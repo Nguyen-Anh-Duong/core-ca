@@ -2,6 +2,7 @@ package repository
 
 import (
 	"core-ca/keymanagement/model"
+	"crypto"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
@@ -10,8 +11,6 @@ import (
 	"io"
 	"math/big"
 	"strconv"
-
-	"crypto"
 
 	"github.com/miekg/pkcs11"
 )
@@ -49,22 +48,24 @@ func (s *softHSMSigner) Public() crypto.PublicKey {
 
 // Sign signs the given digest using the private key
 func (s *softHSMSigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
-	var mechanism *pkcs11.Mechanism
-	if opts == nil || opts.HashFunc() == crypto.Hash(0) {
-		// If no hashing specified, use PKCS1v1.5 raw
-		mechanism = pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
-	} else {
-		// Use the appropriate mechanism based on the hash algorithm
-		switch opts.HashFunc() {
-		case crypto.SHA256:
-			mechanism = pkcs11.NewMechanism(pkcs11.CKM_SHA256_RSA_PKCS, nil)
-		case crypto.SHA384:
-			mechanism = pkcs11.NewMechanism(pkcs11.CKM_SHA384_RSA_PKCS, nil)
-		case crypto.SHA512:
-			mechanism = pkcs11.NewMechanism(pkcs11.CKM_SHA512_RSA_PKCS, nil)
-		default:
-			return nil, fmt.Errorf("unsupported hash algorithm: %v", opts.HashFunc())
+	var dataToSign []byte
+	
+	// Always use CKM_RSA_PKCS but prepare the data correctly
+	mechanism := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
+	
+	if opts != nil && opts.HashFunc() == crypto.SHA256 && len(digest) == 32 {
+		// This is a pre-computed SHA256 hash from x509.CreateCertificate
+		// We need to add the DigestInfo structure for PKCS#1 v1.5 padding
+		// SHA256 DigestInfo: 30 31 30 0d 06 09 60 86 48 01 65 03 04 02 01 05 00 04 20 + hash
+		digestInfo := []byte{
+			0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86,
+			0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+			0x00, 0x04, 0x20,
 		}
+		dataToSign = append(digestInfo, digest...)
+	} else {
+		// For raw data or other cases, use as-is
+		dataToSign = digest
 	}
 
 	err := s.ctx.SignInit(s.session, []*pkcs11.Mechanism{mechanism}, s.privHandle)
@@ -72,10 +73,11 @@ func (s *softHSMSigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOp
 		return nil, fmt.Errorf("failed to init sign: %v", err)
 	}
 
-	signature, err := s.ctx.Sign(s.session, digest)
+	signature, err := s.ctx.Sign(s.session, dataToSign)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign data: %v", err)
 	}
+	
 	return signature, nil
 }
 

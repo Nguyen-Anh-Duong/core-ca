@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 
+	"fmt"
 	"math/big"
 	"time"
 )
@@ -53,12 +54,6 @@ func (s *caService) IssueCertificate(csrPEM string) (model.Certificate, error) {
 		return model.Certificate{}, errors.New("invalid CSR signature")
 	}
 
-	// Get CA key pair
-	keyPair, err := s.keyService.GetKeyPair("test1")
-	if err != nil {
-		return model.Certificate{}, err
-	}
-
 	// Get signer
 	signer, err := s.keyService.GetSigner("test1")
 	if err != nil {
@@ -71,10 +66,10 @@ func (s *caService) IssueCertificate(csrPEM string) (model.Certificate, error) {
 		return model.Certificate{}, err
 	}
 
-	// Create certificate template
+	// Create certificate template for the subject (end entity)
 	notBefore := time.Now()
 	notAfter := notBefore.Add(time.Duration(s.cfg.ValidityDays) * 24 * time.Hour)
-	certTemplate := &x509.Certificate{
+	subjectTemplate := &x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject:      csr.Subject,
 		Issuer: pkix.Name{
@@ -84,40 +79,40 @@ func (s *caService) IssueCertificate(csrPEM string) (model.Certificate, error) {
 		},
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  false,
 		SubjectKeyId:          []byte{1, 2, 3, 4}, // Simplified
-		PublicKey:             csr.PublicKey,
 		SignatureAlgorithm:    x509.SHA256WithRSA,
 	}
 
-	// Create TBS certificate
-	certDER, err := x509.CreateCertificate(rand.Reader, certTemplate, certTemplate, keyPair.PublicKey, signer)
-	if err != nil {
-		return model.Certificate{}, err
+	// Create issuer (CA) template with CA's public key
+	issuerTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName:   s.cfg.Issuer,
+			Organization: []string{"Example Org"},
+			Country:      []string{"VN"},
+		},
+		Issuer: pkix.Name{
+			CommonName:   s.cfg.Issuer,
+			Organization: []string{"Example Org"},
+			Country:      []string{"VN"},
+		},
+		NotBefore:             notBefore.Add(-24 * time.Hour), // CA valid from yesterday
+		NotAfter:              notAfter.Add(365 * 24 * time.Hour), // CA valid longer
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		SignatureAlgorithm:    x509.SHA256WithRSA,
 	}
 
-	// Sign TBS using signer
-	// signature, err := signer.Sign(tbs)
-	// if err != nil {
-	// 	return model.Certificate{}, errors.New("failed to sign TBS certificate")
-	// }
-
-	// Construct final certificate
-	// certDER, err := asn1.Marshal(struct {
-	// 	TBSCertificate     []byte
-	// 	SignatureAlgorithm x509.SignatureAlgorithm
-	// 	Signature          []byte
-	// }{
-	// 	TBSCertificate:     tbs,
-	// 	SignatureAlgorithm: x509.SHA256WithRSA,
-	// 	Signature:          signature,
-	// })
-	// if err != nil {
-	// 	return model.Certificate{}, err
-	// }
+	// Create certificate
+	certDER, err := x509.CreateCertificate(rand.Reader, subjectTemplate, issuerTemplate, csr.PublicKey, signer)
+	if err != nil {
+		return model.Certificate{}, fmt.Errorf("x509.CreateCertificate failed: %v", err)
+	}
 
 	certPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
