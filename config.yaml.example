@@ -1,0 +1,11 @@
+keymanagement:
+  softhsm:
+    module: /usr/lib/softhsm/libsofthsm2.so
+    slot: "YOUR_SLOT_ID"
+    pin: "YOUR_PIN"
+    
+ca:
+  issuer: "CN=Your CA Name,O=Your Organization,C=VN"
+  validity_days: 365
+  database:
+    dsn: "postgres://username:password@localhost:5432/database_name?sslmode=disable" 
