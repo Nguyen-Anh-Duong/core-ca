@@ -5,11 +5,15 @@ import (
 	"core-ca/ca/model"
 	"database/sql"
 	"errors"
+	"time"
 )
 
 type CertificateRepository interface {
 	Save(ctx context.Context, certData model.CertificateData) error
 	FindBySerialNumber(ctx context.Context, serialNumber string) (model.CertificateData, error)
+	Revoke(ctx context.Context, serialNumber string, reason string) error
+	GetRevokedCertificate(ctx context.Context) ([]model.RevokedCertificate, error)
+	IsRevoked(ctx context.Context, serialNumber string) (model.RevokedCertificate, bool, error)
 }
 
 type certificateRepository struct {
@@ -32,6 +36,20 @@ func NewCertificateRepository(db *sql.DB) (CertificateRepository, error) {
 	if err != nil {
 		return nil, errors.New("failed to create certificates table: " + err.Error())
 	}
+
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS revoked_certificates(
+			serial_number VARCHAR PRIMARY KEY,
+			revocation_date TIMESTAMP NOT NULL,
+			reason VARCHAR,
+			FOREIGN KEY (serial_number) REFERENCES certificates(serial_number)
+		)
+	`)
+
+	if err != nil {
+		return nil, errors.New("failed to create revoked_certificates table: " + err.Error())
+	}
+
 	return &certificateRepository{db: db}, nil
 }
 
@@ -64,4 +82,53 @@ func (r *certificateRepository) FindBySerialNumber(ctx context.Context, serialNu
 		return model.CertificateData{}, err // Other error
 	}
 	return certData, nil
+}
+
+func (r *certificateRepository) Revoke(ctx context.Context, serialNumber string, reason string) error {
+	query := `INSERT INTO revoked_certificates (serial_number, revocation_date, reason)
+				VALUES ($1, $2, $3)
+	`
+	_, err := r.db.ExecContext(ctx, query, serialNumber, time.Now(), reason)
+	if err != nil {
+		return errors.New("failed to revoke certificate: " + err.Error())
+	}
+	return nil
+}
+
+func (r *certificateRepository) GetRevokedCertificate(ctx context.Context) ([]model.RevokedCertificate, error) {
+	query := "SELECT serial_number, revocation_date, reason FROM revoked_certificates"
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, errors.New("failed to query revoked certificates: " + err.Error())
+	}
+	defer rows.Close()
+	var revokedCerts []model.RevokedCertificate
+	for rows.Next() {
+		var cert model.RevokedCertificate
+		var reason sql.NullString
+		if err := rows.Scan(&cert.SerialNumber, &cert.RevocationDate, &reason); err != nil {
+			return nil, errors.New("failed to scan revoked certificate: " + err.Error())
+		}
+		if reason.Valid {
+			cert.Reason = reason.String
+		}
+		revokedCerts = append(revokedCerts, cert)
+	}
+	return revokedCerts, nil
+}
+
+func (r *certificateRepository) IsRevoked(ctx context.Context, serialNumber string) (model.RevokedCertificate, bool, error) {
+	query := `SELECT serial_number, revocation_date, reason FROM revoked_certificates
+	WHERE revoked_certificates.serial_number = $1
+`
+	var cert model.RevokedCertificate
+	var reason sql.NullString
+	err := r.db.QueryRowContext(ctx, query, serialNumber).Scan(&cert.SerialNumber, &cert.RevocationDate, &cert.Reason)
+	if err != nil {
+		return model.RevokedCertificate{}, false, errors.New("failed to check revocation status: " + err.Error())
+	}
+	if reason.Valid {
+		cert.Reason = reason.String
+	}
+	return cert, true, nil
 }

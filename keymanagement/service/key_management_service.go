@@ -28,12 +28,12 @@ func (s *keyManagementService) GenerateKeyPair(id string) (model.KeyPair, error)
 	if err != nil {
 		return model.KeyPair{}, err
 	}
-	// Decode the PEM-encoded public key
-	pubKeyBlock, _ := pem.Decode([]byte(keyPairData.PublicKey))
-	if pubKeyBlock == nil {
+	// Decode the PEM-encoded public key.
+	block, _ := pem.Decode([]byte(keyPairData.PublicKey))
+	if block == nil {
 		return model.KeyPair{}, fmt.Errorf("failed to decode PEM block")
 	}
-	pubKey, err := x509.ParsePKCS1PublicKey(pubKeyBlock.Bytes)
+	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
 		return model.KeyPair{}, fmt.Errorf("failed to parse public key: %v", err)
 	}
@@ -50,19 +50,21 @@ func (s *keyManagementService) GetKeyPair(id string) (model.KeyPair, error) {
 		return model.KeyPair{}, err
 	}
 
-	pubKeyBlock, _ := pem.Decode([]byte(keyPairData.PublicKey))
-	if pubKeyBlock == nil {
+	// Decode the PEM-encoded public key.
+	block, _ := pem.Decode([]byte(keyPairData.PublicKey))
+	if block == nil {
 		return model.KeyPair{}, fmt.Errorf("failed to decode PEM block")
 	}
-	pubKey, err := x509.ParsePKCS1PublicKey(pubKeyBlock.Bytes)
+	pubKey, err := x509.ParsePKCS1PublicKey(block.Bytes)
 	if err != nil {
 		return model.KeyPair{}, fmt.Errorf("failed to parse public key: %v", err)
 	}
 
+	// PrivateKey is managed by SoftHSM.
 	return model.KeyPair{
-		ID:        id,
-		PublicKey: pubKey,
-		// PrivateKey is managed by SoftHSM
+		ID:         id,
+		PublicKey:  pubKey,
+		PrivateKey: nil, // PrivateKey is managed by SoftHSM
 	}, nil
 }
 

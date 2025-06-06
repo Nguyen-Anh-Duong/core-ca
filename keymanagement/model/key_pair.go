@@ -2,16 +2,16 @@ package model
 
 import "crypto/rsa"
 
-// KeyPair represents a public/private key pair
+// KeyPair represents a public/private key pair.
 type KeyPair struct {
 	ID         string
 	PrivateKey *rsa.PrivateKey
 	PublicKey  *rsa.PublicKey
 }
 
-// KeyPairData for serializing metadata
+// KeyPairData for serializing metadata.
 type KeyPairData struct {
-	ID        string
-	PublicKey string // PEM-encoded public key
-	KeyLabel  string // Label for the key
+	ID        string `json:"id"`
+	PublicKey string `json:"publicKey"`
+	KeyLabel  string `json:"keyLabel"`
 }

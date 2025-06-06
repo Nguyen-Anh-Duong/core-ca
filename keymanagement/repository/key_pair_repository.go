@@ -15,7 +15,7 @@ import (
 	"github.com/miekg/pkcs11"
 )
 
-// KeyPairRepository interface for key storage
+// KeyPairRepository interface for key storage.
 type KeyPairRepository interface {
 	GenerateKeyPair(id string) (model.KeyPairData, error)
 	FindByID(id string) (model.KeyPairData, error)
@@ -41,43 +41,51 @@ type softHSMSigner struct {
 	publicKey  *rsa.PublicKey
 }
 
-// Public returns the public key associated with the signer
+// Public returns the public key associated with the signer.
 func (s *softHSMSigner) Public() crypto.PublicKey {
 	return s.publicKey
 }
 
-// Sign signs the given digest using the private key
+// Sign signs the given digest using the private key.
 func (s *softHSMSigner) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpts) ([]byte, error) {
-	var dataToSign []byte
-	
-	// Always use CKM_RSA_PKCS but prepare the data correctly
-	mechanism := pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)
-	
-	if opts != nil && opts.HashFunc() == crypto.SHA256 && len(digest) == 32 {
-		// This is a pre-computed SHA256 hash from x509.CreateCertificate
-		// We need to add the DigestInfo structure for PKCS#1 v1.5 padding
-		// SHA256 DigestInfo: 30 31 30 0d 06 09 60 86 48 01 65 03 04 02 01 05 00 04 20 + hash
-		digestInfo := []byte{
-			0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86,
-			0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
-			0x00, 0x04, 0x20,
-		}
-		dataToSign = append(digestInfo, digest...)
-	} else {
-		// For raw data or other cases, use as-is
-		dataToSign = digest
-	}
+	// Always use CKM_RSA_PKCS but prepare the data correctly.
+	mechanism := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)}
 
-	err := s.ctx.SignInit(s.session, []*pkcs11.Mechanism{mechanism}, s.privHandle)
+	// This is a pre-computed SHA256 hash from x509.CreateCertificate.
+	// We need to add the DigestInfo structure for PKCS#1 v1.5 padding.
+	// SHA256 DigestInfo: 30 31 30 0d 06 09 60 86 48 01 65 03 04 02 01 05 00 04 20 + hash.
+	if len(digest) == 32 {
+		// Prepend DigestInfo for SHA256
+		digestInfo := []byte{0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20}
+		fullDigest := append(digestInfo, digest...)
+		digest = fullDigest
+	}
+	// For raw data or other cases, use as-is.
+
+	err := s.ctx.SignInit(s.session, mechanism, s.privHandle)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init sign: %v", err)
 	}
 
-	signature, err := s.ctx.Sign(s.session, dataToSign)
+	signature, err := s.ctx.Sign(s.session, digest)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign data: %v", err)
 	}
-	
+
+	return signature, nil
+}
+
+func (s *softHSMSigner) SignRaw(data []byte) ([]byte, error) {
+	// Always use CKM_RSA_PKCS for direct signing
+	mechanism := []*pkcs11.Mechanism{pkcs11.NewMechanism(pkcs11.CKM_RSA_PKCS, nil)}
+	err := s.ctx.SignInit(s.session, mechanism, s.privHandle)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init sign: %v", err)
+	}
+	signature, err := s.ctx.Sign(s.session, data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign data: %v", err)
+	}
 	return signature, nil
 }
 
@@ -87,7 +95,13 @@ func NewSoftHsmKeyPairRepository(modulePath, slot, pin string) (KeyPairRepositor
 		return nil, pkcs11.Error(pkcs11.CKR_GENERAL_ERROR)
 	}
 
-	err := ctx.Initialize()
+	// Parse slot string to uint.
+	slotID, err := strconv.ParseUint(slot, 10, 32)
+	if err != nil {
+		return nil, err
+	}
+
+	err = ctx.Initialize()
 	if err != nil {
 		return nil, err
 	}
@@ -97,28 +111,24 @@ func NewSoftHsmKeyPairRepository(modulePath, slot, pin string) (KeyPairRepositor
 		return nil, err
 	}
 
-	// Parse slot string to uint
-	slotUint, err := strconv.ParseUint(slot, 10, 32)
-	if err != nil {
-		return nil, err
-	}
-	slotID := uint(slotUint)
+	var targetSlot uint
 	found := false
 	for _, s := range slots {
-		if s == slotID {
+		if uint64(s) == slotID {
+			targetSlot = s
 			found = true
 			break
 		}
 	}
-
 	if !found {
 		return nil, errors.New("slot not found")
 	}
 
-	session, err := ctx.OpenSession(slotID, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
+	session, err := ctx.OpenSession(targetSlot, pkcs11.CKF_SERIAL_SESSION|pkcs11.CKF_RW_SESSION)
 	if err != nil {
 		return nil, err
 	}
+
 	err = ctx.Login(session, pkcs11.CKU_USER, pin)
 	if err != nil {
 		return nil, err
@@ -126,7 +136,7 @@ func NewSoftHsmKeyPairRepository(modulePath, slot, pin string) (KeyPairRepositor
 
 	return &softHSMKeyPairRepository{
 		ctx:     ctx,
-		slot:    slotID,
+		slot:    uint(slotID),
 		pin:     pin,
 		session: session,
 	}, nil
@@ -167,7 +177,7 @@ func (r *softHSMKeyPairRepository) GenerateKeyPair(id string) (model.KeyPairData
 		return model.KeyPairData{}, fmt.Errorf("failed to generate key pair: %v", err)
 	}
 
-	// Get public key components
+	// Get public key components.
 	pubKeyAttr := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_MODULUS, nil),
 		pkcs11.NewAttribute(pkcs11.CKA_PUBLIC_EXPONENT, nil),
@@ -178,13 +188,13 @@ func (r *softHSMKeyPairRepository) GenerateKeyPair(id string) (model.KeyPairData
 		return model.KeyPairData{}, fmt.Errorf("failed to get public key attributes: %v", err)
 	}
 
-	// Create RSA public key from modulus and exponent
+	// Create RSA public key from modulus and exponent.
 	pubKey := &rsa.PublicKey{
 		N: new(big.Int).SetBytes(attrs[0].Value),
 		E: int(new(big.Int).SetBytes(attrs[1].Value).Int64()),
 	}
 
-	// Encode public key in PKCS1 format
+	// Encode public key in PKCS1 format.
 	pubKeyPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PUBLIC KEY",
 		Bytes: x509.MarshalPKCS1PublicKey(pubKey),
@@ -207,7 +217,6 @@ func (r *softHSMKeyPairRepository) FindByID(id string) (model.KeyPairData, error
 		return model.KeyPairData{}, err
 	}
 	objs, _, err := r.ctx.FindObjects(r.session, 1)
-	// fmt.Println(objs)
 	if err != nil || len(objs) == 0 {
 		return model.KeyPairData{}, errors.New("key not found")
 	}
@@ -216,7 +225,7 @@ func (r *softHSMKeyPairRepository) FindByID(id string) (model.KeyPairData, error
 		return model.KeyPairData{}, err
 	}
 
-	// Get public key attributes
+	// Get public key attributes.
 	pubKeyAttr := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_MODULUS, nil),
 		pkcs11.NewAttribute(pkcs11.CKA_PUBLIC_EXPONENT, nil),
@@ -226,7 +235,7 @@ func (r *softHSMKeyPairRepository) FindByID(id string) (model.KeyPairData, error
 		return model.KeyPairData{}, err
 	}
 
-	// Create RSA public key from modulus and exponent
+	// Create RSA public key from modulus and exponent.
 	pubKey := &rsa.PublicKey{
 		N: new(big.Int).SetBytes(attrs[0].Value),
 		E: int(new(big.Int).SetBytes(attrs[1].Value).Int64()),
@@ -245,7 +254,7 @@ func (r *softHSMKeyPairRepository) FindByID(id string) (model.KeyPairData, error
 }
 
 func (r *softHSMKeyPairRepository) GetSigner(keyLabel string) (crypto.Signer, error) {
-	// Find private key
+	// Find private key.
 	privTemplate := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
 		pkcs11.NewAttribute(pkcs11.CKA_LABEL, keyLabel),
@@ -265,7 +274,7 @@ func (r *softHSMKeyPairRepository) GetSigner(keyLabel string) (crypto.Signer, er
 	}
 	privHandle := privObjs[0]
 
-	// Get private key ID
+	// Get private key ID.
 	privAttrs := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
 	}
@@ -275,7 +284,7 @@ func (r *softHSMKeyPairRepository) GetSigner(keyLabel string) (crypto.Signer, er
 	}
 	keyID := attrs[0].Value
 
-	// Find corresponding public key using the same ID
+	// Find corresponding public key using the same ID.
 	pubTemplate := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PUBLIC_KEY),
 		pkcs11.NewAttribute(pkcs11.CKA_ID, keyID),
@@ -294,7 +303,7 @@ func (r *softHSMKeyPairRepository) GetSigner(keyLabel string) (crypto.Signer, er
 		return nil, fmt.Errorf("failed to finalize public key search: %v", err)
 	}
 
-	// Get public key attributes
+	// Get public key attributes.
 	pubKeyAttr := []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_MODULUS, nil),
 		pkcs11.NewAttribute(pkcs11.CKA_PUBLIC_EXPONENT, nil),
@@ -304,7 +313,7 @@ func (r *softHSMKeyPairRepository) GetSigner(keyLabel string) (crypto.Signer, er
 		return nil, fmt.Errorf("failed to get public key attributes: %v", err)
 	}
 
-	// Create RSA public key
+	// Create RSA public key.
 	publicKey := &rsa.PublicKey{
 		N: new(big.Int).SetBytes(attrs[0].Value),
 		E: int(new(big.Int).SetBytes(attrs[1].Value).Int64()),

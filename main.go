@@ -17,6 +17,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	_ "github.com/jackc/pgx/v5/stdlib"
+
+	"net/http"
 )
 
 type App struct {
@@ -36,7 +38,7 @@ func main() {
 		panic(err)
 	}
 
-	// Initialize PostgreSQL connection
+	// Initialize PostgreSQL connection.
 	db, err := sql.Open("pgx", caCfg.Database.DSN)
 	if err != nil {
 		panic("failed to connect to database: " + err.Error())
@@ -110,6 +112,32 @@ func main() {
 			"certificate":  pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}),
 		})
 	})
+
+	r.POST("/ca/revoke", func(c *gin.Context) {
+        var req struct {
+            SerialNumber string `json:"serial_number"`
+            Reason       string `json:"reason"`
+        }
+        if err := c.BindJSON(&req); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+            return
+        }
+        err := app.caService.RevokeCertificate(req.SerialNumber, req.Reason)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusOK, gin.H{"message": "Certificate revoked"})
+    })
+
+    r.GET("/ca/crl", func(c *gin.Context) {
+        crl, err := app.caService.GetCRL()
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+            return
+        }
+        c.Data(http.StatusOK, "application/x-pem-file", crl)
+    })
 
 	go func() {
 		if err := r.Run(":8080"); err != nil {
