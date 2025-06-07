@@ -1,0 +1,208 @@
+basePath: /
+definitions:
+  main.CertificateIssueRequest:
+    properties:
+      csr:
+        example: '-----BEGIN CERTIFICATE REQUEST-----...'
+        type: string
+    required:
+    - csr
+    type: object
+  main.CertificateRevokeRequest:
+    properties:
+      reason:
+        example: compromised
+        type: string
+      serial_number:
+        example: "123456789"
+        type: string
+    required:
+    - reason
+    - serial_number
+    type: object
+  main.CertificateRevokeResponse:
+    properties:
+      message:
+        example: Certificate revoked
+        type: string
+    type: object
+  main.ErrorResponse:
+    properties:
+      error:
+        example: Invalid request
+        type: string
+    type: object
+  main.KeyGenerateRequest:
+    properties:
+      id:
+        example: my-key-id
+        type: string
+    required:
+    - id
+    type: object
+  main.KeyGenerateResponse:
+    properties:
+      id:
+        example: my-key-id
+        type: string
+    type: object
+  main.KeyGetResponse:
+    properties:
+      id:
+        example: my-key-id
+        type: string
+      publicKey:
+        example: |-
+          -----BEGIN RSA PUBLIC KEY-----
+          ...
+        type: string
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: Certificate Authority API for key management and certificate operations
+  license:
+    name: Apache 2.0
+    url: http://www.apache.org/licenses/LICENSE-2.0.html
+  termsOfService: http://swagger.io/terms/
+  title: Core CA API
+  version: "1.0"
+paths:
+  /ca/crl:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve the current Certificate Revocation List
+      produces:
+      - application/x-pem-file
+      responses:
+        "200":
+          description: PEM encoded CRL
+          schema:
+            type: string
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Get Certificate Revocation List (CRL)
+      tags:
+      - Certificate Authority
+  /ca/issue:
+    post:
+      consumes:
+      - application/json
+      description: Issue a new certificate from a Certificate Signing Request (CSR)
+      parameters:
+      - description: Certificate issuance request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.CertificateIssueRequest'
+      produces:
+      - application/x-pem-file
+      responses:
+        "200":
+          description: PEM encoded certificate
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Issue a new certificate
+      tags:
+      - Certificate Authority
+  /ca/revoke:
+    post:
+      consumes:
+      - application/json
+      description: Revoke a certificate by its serial number with a specified reason
+      parameters:
+      - description: Certificate revocation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.CertificateRevokeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.CertificateRevokeResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Revoke a certificate
+      tags:
+      - Certificate Authority
+  /keymanagement/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve a key pair by its ID and return the public key
+      parameters:
+      - description: Key ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.KeyGetResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Get a key pair by ID
+      tags:
+      - Key Management
+  /keymanagement/generate:
+    post:
+      consumes:
+      - application/json
+      description: Generate a new RSA key pair with the specified ID
+      parameters:
+      - description: Key generation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.KeyGenerateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.KeyGenerateResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Generate a new key pair
+      tags:
+      - Key Management
+swagger: "2.0"
