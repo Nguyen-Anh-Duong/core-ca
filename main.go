@@ -99,45 +99,39 @@ func main() {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
-		cert, err := app.caService.IssueCertificate(req.CSR)
+		certPEM, err := app.caService.IssueCertificate(req.CSR)
 		if err != nil {
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(200, gin.H{
-			"serialNumber": cert.SerialNumber,
-			"subject":      cert.Subject,
-			"notBefore":    cert.NotBefore,
-			"notAfter":     cert.NotAfter,
-			"certificate":  pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}),
-		})
+		c.Data(http.StatusOK, "application/x-pem-file", certPEM)
 	})
 
 	r.POST("/ca/revoke", func(c *gin.Context) {
-        var req struct {
-            SerialNumber string `json:"serial_number"`
-            Reason       string `json:"reason"`
-        }
-        if err := c.BindJSON(&req); err != nil {
-            c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-            return
-        }
-        err := app.caService.RevokeCertificate(req.SerialNumber, req.Reason)
-        if err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-            return
-        }
-        c.JSON(http.StatusOK, gin.H{"message": "Certificate revoked"})
-    })
+		var req struct {
+			SerialNumber string `json:"serial_number"`
+			Reason       string `json:"reason"`
+		}
+		if err := c.BindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		err := app.caService.RevokeCertificate(req.SerialNumber, req.Reason)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "Certificate revoked"})
+	})
 
-    r.GET("/ca/crl", func(c *gin.Context) {
-        crl, err := app.caService.GetCRL()
-        if err != nil {
-            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-            return
-        }
-        c.Data(http.StatusOK, "application/x-pem-file", crl)
-    })
+	r.GET("/ca/crl", func(c *gin.Context) {
+		crlPEM, err := app.caService.GetCRL()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.Data(http.StatusOK, "application/x-pem-file", crlPEM)
+	})
 
 	go func() {
 		if err := r.Run(":8080"); err != nil {

@@ -1,14 +1,17 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"core-ca/ca/config"
 	"core-ca/ca/model"
 	"core-ca/ca/repository"
 	"core-ca/keymanagement/service"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"log"
 
 	"encoding/asn1"
 	"encoding/pem"
@@ -20,7 +23,7 @@ import (
 )
 
 type CaService interface {
-	IssueCertificate(csrPEM string) (model.Certificate, error)
+	IssueCertificate(csrPEM string) ([]byte, error)
 	RevokeCertificate(serialNumber, reason string) error
 	GetCRL() ([]byte, error)
 	// GetCertificateStatus(serialNumber string) (model.CertificateStatus, error)
@@ -40,33 +43,33 @@ func NewCaService(repo repository.CertificateRepository, keyService service.KeyM
 	}
 }
 
-func (s *caService) IssueCertificate(csrPEM string) (model.Certificate, error) {
+func (s *caService) IssueCertificate(csrPEM string) ([]byte, error) {
 	ctx := context.Background()
 
 	// Parse CSR
 	csrBlock, _ := pem.Decode([]byte(csrPEM))
 
 	if csrBlock == nil || csrBlock.Type != "CERTIFICATE REQUEST" {
-		return model.Certificate{}, errors.New("invalid CSR")
+		return nil, errors.New("invalid CSR")
 	}
 	csr, err := x509.ParseCertificateRequest(csrBlock.Bytes)
 	if err != nil {
-		return model.Certificate{}, err
+		return nil, err
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return model.Certificate{}, errors.New("invalid CSR signature")
+		return nil, errors.New("invalid CSR signature")
 	}
 
 	// Get signer.
 	signer, err := s.keyService.GetSigner("test1")
 	if err != nil {
-		return model.Certificate{}, err
+		return nil, err
 	}
 
 	// Generate serial number
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return model.Certificate{}, err
+		return nil, err
 	}
 
 	// Create certificate template for the subject (end entity).
@@ -76,9 +79,9 @@ func (s *caService) IssueCertificate(csrPEM string) (model.Certificate, error) {
 		SerialNumber: serialNumber,
 		Subject:      csr.Subject,
 		Issuer: pkix.Name{
-			CommonName:   s.cfg.Issuer,
-			Organization: []string{"Example Org"},
-			Country:      []string{"VN"},
+			CommonName: s.cfg.Issuer,
+			// Organization: []string{"Example Org"},
+			// Country:      []string{"VN"},
 		},
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
@@ -93,11 +96,11 @@ func (s *caService) IssueCertificate(csrPEM string) (model.Certificate, error) {
 	// Create issuer (CA) template with CA's public key.
 	issuerTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			CommonName:   s.cfg.Issuer,
-			Organization: []string{"Example Org"},
-			Country:      []string{"VN"},
-		},
+		// Subject: pkix.Name{
+		// 	CommonName:   s.cfg.Issuer,
+		// 	Organization: []string{"Example Org"},
+		// 	Country:      []string{"VN"},
+		// },
 		Issuer: pkix.Name{
 			CommonName:   s.cfg.Issuer,
 			Organization: []string{"Example Org"},
@@ -109,12 +112,15 @@ func (s *caService) IssueCertificate(csrPEM string) (model.Certificate, error) {
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		SignatureAlgorithm:    x509.SHA256WithRSA,
+		CRLDistributionPoints: []string{
+			"https://my-ca.example.com/ca/crl",
+		},
 	}
 
 	// Create certificate.
 	certDER, err := x509.CreateCertificate(rand.Reader, subjectTemplate, issuerTemplate, csr.PublicKey, signer)
 	if err != nil {
-		return model.Certificate{}, fmt.Errorf("x509.CreateCertificate failed: %v", err)
+		return nil, fmt.Errorf("x509.CreateCertificate failed: %v", err)
 	}
 
 	certPEM := pem.EncodeToMemory(&pem.Block{
@@ -131,16 +137,10 @@ func (s *caService) IssueCertificate(csrPEM string) (model.Certificate, error) {
 		CertPEM:      string(certPEM),
 	}
 	if err := s.repo.Save(ctx, certData); err != nil {
-		return model.Certificate{}, err
+		return nil, err
 	}
 
-	return model.Certificate{
-		SerialNumber: certData.SerialNumber,
-		Subject:      certData.Subject,
-		NotBefore:    string(certData.NotBefore.Format(time.RFC3339)),
-		NotAfter:     string(certData.NotAfter.Format(time.RFC3339)),
-		Raw:          certDER,
-	}, nil
+	return certPEM, nil
 }
 
 func (s *caService) RevokeCertificate(serialNumber, reason string) error {
@@ -158,6 +158,12 @@ func (s *caService) GetCRL() ([]byte, error) {
 	ctx := context.Background()
 
 	revokedCerts, err := s.repo.GetRevokedCertificate(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	//Get key pair
+	keypair, err := s.keyService.GetKeyPair("test1")
 	if err != nil {
 		return nil, err
 	}
@@ -213,35 +219,60 @@ func (s *caService) GetCRL() ([]byte, error) {
 		RevokedCertificateEntries: revokedList,
 		ThisUpdate:                time.Now(),
 		NextUpdate:                time.Now().Add(7 * 24 * time.Hour),
+		Number:                    big.NewInt(1),
 	}
 
 	notBefore := time.Now()
 	notAfter := notBefore.Add(time.Duration(s.cfg.ValidityDays) * 24 * time.Hour)
+
+	pubKeyBytes, err := x509.MarshalPKIXPublicKey(keypair.PublicKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	issuerTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject: pkix.Name{
-			CommonName:   s.cfg.Issuer,
-			Organization: []string{"Example Org"},
-			Country:      []string{"VN"},
+			CommonName: s.cfg.Issuer,
+			// Organization: []string{"Example Org"},
+			// Country:      []string{"VN"},
 		},
 		Issuer: pkix.Name{
-			CommonName:   s.cfg.Issuer,
-			Organization: []string{"Example Org"},
-			Country:      []string{"VN"},
+			CommonName: s.cfg.Issuer + "haha",
+			// Organization: []string{"Example Org"},
+			// Country:      []string{"VN"},
 		},
 		NotBefore:             notBefore.Add(-24 * time.Hour),
 		NotAfter:              notAfter.Add(365 * 24 * time.Hour), // CA valid longer.
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
 		SignatureAlgorithm:    x509.SHA256WithRSA,
+		PublicKey:             keypair.PublicKey,
+		PublicKeyAlgorithm:    x509.RSA,
+		CRLDistributionPoints: []string{
+			"https://my-ca.example.com/ca/crl",
+		},
+		SubjectKeyId: func() []byte {
+			sum := sha1.Sum(pubKeyBytes)
+			return sum[:]
+		}(),
 	}
 
-	signature, err := x509.CreateRevocationList(rand.Reader, &crlTemplate, issuerTemplate, signer)
+	crlDER, err := x509.CreateRevocationList(rand.Reader, &crlTemplate, issuerTemplate, signer)
 	if err != nil {
 		return nil, err
 	}
 
-	return signature, nil
-}
+	var pemBuf bytes.Buffer
+	err = pem.Encode(&pemBuf, &pem.Block{
+		Type:  "X509 CRL",
+		Bytes: crlDER,
+	})
+	if err != nil {
+		return nil, err
+	}
 
+	return pemBuf.Bytes(), nil
+
+}
