@@ -23,19 +23,24 @@ import (
 )
 
 type CaService interface {
+	CreateCA(ctx context.Context, name string, caType string, parentCAID *int) (model.CA, error)
+	GetCA(ctx context.Context, caID int) (model.CA, error)
+	// GetCAChain (ctx context.Context, id int) ([]model.CA, error)
+	RevokeCA(ctx context.Context, caID int, reason model.RevocationReason) error
+
 	IssueCertificate(csrPEM string) ([]byte, error)
-	RevokeCertificate(serialNumber, reason string) error
+	RevokeCertificate(serialNumber, reason model.RevocationReason) error
 	GetCRL() ([]byte, error)
 	// GetCertificateStatus(serialNumber string) (model.CertificateStatus, error)
 }
 
 type caService struct {
-	repo       repository.CertificateRepository
+	repo       repository.Repository
 	keyService service.KeyManagementService
 	cfg        *config.Config
 }
 
-func NewCaService(repo repository.CertificateRepository, keyService service.KeyManagementService, cfg *config.Config) CaService {
+func NewCaService(repo repository.Repository, keyService service.KeyManagementService, cfg *config.Config) CaService {
 	return &caService{
 		repo:       repo,
 		keyService: keyService,
@@ -151,13 +156,13 @@ func (s *caService) RevokeCertificate(serialNumber, reason string) error {
 		return errors.New("certificate not found")
 	}
 	// Revoke certificate.
-	return s.repo.Revoke(ctx, serialNumber, reason)
+	return s.repo.Revoke(ctx, serialNumber, reason, false)
 }
 
 func (s *caService) GetCRL() ([]byte, error) {
 	ctx := context.Background()
 
-	revokedCerts, err := s.repo.GetRevokedCertificate(ctx)
+	revokedCerts, err := s.repo.GetRevokedCertificates(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -180,15 +185,15 @@ func (s *caService) GetCRL() ([]byte, error) {
 		if !ok {
 			return nil, errors.New("invalid serial number")
 		}
-		reasonCode := map[string]int{
-			"unspecified":          0,
-			"keyCompromise":        1,
-			"caCompromise":         2,
-			"affiliationChanged":   3,
-			"superseded":           4,
-			"cessationOfOperation": 5,
-			"certificateHold":      6,
-		}[cert.Reason]
+		var reasonCode = map[model.RevocationReason]int{
+			model.ReasonUnspecified:          0,
+			model.ReasonKeyCompromise:        1,
+			model.ReasonCACompromise:         2,
+			model.ReasonAffiliationChanged:   3,
+			model.ReasonSuperseded:           4,
+			model.ReasonCessationOfOperation: 5,
+			model.ReasonCertificateHold:      6,
+		}[model.RevocationReason(cert.Reason)]
 
 		value, err := asn1.Marshal(reasonCode)
 		if err != nil {

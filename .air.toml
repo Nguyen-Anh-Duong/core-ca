@@ -1,19 +1,18 @@
 # .air.toml
+# Root của module
+root = "."
+tmp_dir = "tmp"
+
 [build]
-  cmd = "go build -o ./tmp/main"
-  bin = "./tmp/main"
-  full_bin = ""
-  include_ext = ["go"]
-  exclude_dir = ["vendor", "tmp", "node_modules"]
-  exclude_file = []
-  include_dir = ["."]
-  exclude_regex = ["_test.go"]
+  cmd = "go build -o tmp/main main.go"
+  bin = "tmp/main"
+  full_bin = true
+  exclude_dir = ["tmp", "vendor"]
+  include_ext = ["go", "yaml", "json"]
+  exclude_file = ["_test.go"]
 
 [log]
   time = true
 
 [color]
   main = "yellow"
-  watcher = "cyan"
-  build = "green"
-  runner = "magenta"

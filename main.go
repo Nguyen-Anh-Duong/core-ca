@@ -220,7 +220,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	caRepo, err := ca_repository.NewCertificateRepository(db)
+	caRepo, err := ca_repository.NewRepository(db)
 	if err != nil {
 		panic(err)
 	}
@@ -231,10 +231,11 @@ func main() {
 	app := &App{keyService: keyService, caService: caService, db: db}
 
 	r := gin.Default()
-	
+	gin.SetMode(gin.ReleaseMode)
+
 	// Swagger endpoint
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	
+
 	r.POST("/keymanagement/generate", app.GenerateKeyPair)
 	r.GET("/keymanagement/:id", app.GetKeyPair)
 	r.POST("/ca/issue", app.IssueCertificate)
