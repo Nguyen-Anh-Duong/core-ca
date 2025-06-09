@@ -8,8 +8,8 @@ import (
 )
 
 type CertificateRepository interface {
-	Save(ctx context.Context, certData model.CertificateData) error
-	FindBySerialNumber(ctx context.Context, serialNumber string) (model.CertificateData, error)
+	SaveCert(ctx context.Context, certData model.Certificate) error
+	FindBySerialNumber(ctx context.Context, serialNumber string) (model.Certificate, error)
 }
 
 type certificateRepository struct {
@@ -22,11 +22,15 @@ func NewCertificateRepository(db *sql.DB) (CertificateRepository, error) {
 	}
 	_, err := db.Exec(`
         CREATE TABLE IF NOT EXISTS certificates (
-            serial_number VARCHAR PRIMARY KEY,
+			id SERIAL PRIMARY KEY,
+            serial_number VARCHAR NOT NULL,
             subject VARCHAR NOT NULL,
             not_before TIMESTAMP NOT NULL,
             not_after TIMESTAMP NOT NULL,
             cert_pem TEXT NOT NULL
+			ca_id INTEGER,
+			status VARCHAR NOT NULL DEFAULT 'valid' CHECK (status IN ('valid', 'revoked', 'expired', 'unknown')),
+			CONSTRAINT fk_ca_id FOREIGN KEY (ca_id) REFERENCES certificate_authorities(id),
         )
     `)
 	if err != nil {
@@ -36,7 +40,7 @@ func NewCertificateRepository(db *sql.DB) (CertificateRepository, error) {
 	return &certificateRepository{db: db}, nil
 }
 
-func (r *certificateRepository) Save(ctx context.Context, certData model.CertificateData) error {
+func (r *certificateRepository) SaveCert(ctx context.Context, certData model.Certificate) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO certificates (serial_number, subject, not_before, not_after, cert_pem)
 		VALUES ($1, $2, $3, $4, $5)
@@ -49,8 +53,8 @@ func (r *certificateRepository) Save(ctx context.Context, certData model.Certifi
 	return err
 }
 
-func (r *certificateRepository) FindBySerialNumber(ctx context.Context, serialNumber string) (model.CertificateData, error) {
-	var certData model.CertificateData
+func (r *certificateRepository) FindBySerialNumber(ctx context.Context, serialNumber string) (model.Certificate, error) {
+	var certData model.Certificate
 	row := r.db.QueryRowContext(ctx, `
 		SELECT serial_number, subject, not_before, not_after, cert_pem
 		FROM certificates
@@ -60,9 +64,9 @@ func (r *certificateRepository) FindBySerialNumber(ctx context.Context, serialNu
 	err := row.Scan(&certData.SerialNumber, &certData.Subject, &certData.NotBefore, &certData.NotAfter, &certData.CertPEM)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return model.CertificateData{}, nil // No certificate found
+			return model.Certificate{}, nil // No certificate found
 		}
-		return model.CertificateData{}, err // Other error
+		return model.Certificate{}, err // Other error
 	}
 	return certData, nil
 }

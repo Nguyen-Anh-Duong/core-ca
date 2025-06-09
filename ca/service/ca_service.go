@@ -134,14 +134,14 @@ func (s *caService) IssueCertificate(csrPEM string) ([]byte, error) {
 	})
 
 	// Save certificate metadata.
-	certData := model.CertificateData{
+	certData := model.Certificate{
 		SerialNumber: serialNumber.String(),
 		Subject:      csr.Subject.CommonName,
 		NotBefore:    notBefore,
 		NotAfter:     notAfter,
 		CertPEM:      string(certPEM),
 	}
-	if err := s.repo.Save(ctx, certData); err != nil {
+	if err := s.repo.SaveCert(ctx, certData); err != nil {
 		return nil, err
 	}
 
@@ -372,6 +372,9 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 	// else create intermediate CA signed by parent CA
 	if caType == model.RootCAType {
 		signer, err := s.keyService.GetSigner(keyLabel)
+		if err != nil {
+			return model.CA{}, fmt.Errorf("failed to get signer for CA key: %v", err)
+		}
 		// Create self-signed certificate for root CA
 		signedCert, err = x509.CreateCertificate(rand.Reader, &CAcertTemplate, &CAcertTemplate, keyPair.PublicKey, signer)
 		if err != nil {
@@ -379,7 +382,7 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 		}
 	} else {
 		// Create intermediate CA signed by parent CA
-		parentCA, err := s.repo.GetCAByID(ctx, *parentCAID)
+		parentCA, err := s.repo.FindCAByID(ctx, *parentCAID)
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to get parent CA: %v", err)
 		}
@@ -394,7 +397,8 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 			return model.CA{}, fmt.Errorf("failed to create intermediate CA certificate: %v", err)
 		}
 	}
-	x509.CreateCertificate()
+
+	fmt.Println(signedCert, publicKeyPEM)
 
 	// save ca
 	// ca := model.CA{

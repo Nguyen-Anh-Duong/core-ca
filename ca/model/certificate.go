@@ -21,8 +21,8 @@ import "time"
 type Certificate struct {
 	ID           int    `json:"id"`
 	SerialNumber string `json:"serial_number"`
-	CAID         int    `json:"ca_id"`     // Gắn với CA nào
-	CAKeyID      int    `json:"ca_key_id"` // Gắn với key nào
+	CAID         int    `json:"ca_id"` // Gắn với CA nào
+	// CAKeyID      int    `json:"ca_key_id"` // Gắn với key nào
 	// Usage        []KeyUsage        `json:"usage"`     // certSign, crlSign, ocspSign...
 	Subject   string            `json:"subject"`
 	NotBefore time.Time         `json:"not_before"`
