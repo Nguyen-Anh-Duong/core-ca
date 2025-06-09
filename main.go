@@ -1,14 +1,14 @@
 package main
 
 import (
-	caconfig "core-ca/ca/config"
+	"core-ca/ca/model"
 	ca_repository "core-ca/ca/repository"
 	ca_service "core-ca/ca/service"
+	"core-ca/config"
 	"os"
 	"os/signal"
 	"syscall"
 
-	keyconfig "core-ca/keymanagement/config"
 	"core-ca/keymanagement/repository"
 	"core-ca/keymanagement/service"
 	"crypto/x509"
@@ -170,7 +170,7 @@ func (app *App) RevokeCertificate(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	err := app.caService.RevokeCertificate(req.SerialNumber, req.Reason)
+	err := app.caService.RevokeCertificate(req.SerialNumber, model.RevocationReason(req.Reason))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -196,18 +196,14 @@ func (app *App) GetCRL(c *gin.Context) {
 }
 
 func main() {
-	keyCfg, err := keyconfig.LoadConfig()
-	if err != nil {
-		panic(err)
-	}
-
-	caCfg, err := caconfig.LoadConfig()
+	// Load unified config
+	appCfg, err := config.LoadConfig()
 	if err != nil {
 		panic(err)
 	}
 
 	// Initialize PostgreSQL connection.
-	db, err := sql.Open("pgx", caCfg.Database.DSN)
+	db, err := sql.Open("pgx", appCfg.CA.Database.DSN)
 	if err != nil {
 		panic("failed to connect to database: " + err.Error())
 	}
@@ -216,7 +212,11 @@ func main() {
 		panic("failed to ping database: " + err.Error())
 	}
 
-	repo, err := repository.NewSoftHsmKeyPairRepository(keyCfg.SoftHSMModule, keyCfg.SoftHSMSlot, keyCfg.SoftHSMPin)
+	repo, err := repository.NewSoftHsmKeyPairRepository(
+		appCfg.KeyManagement.SoftHSM.Module, 
+		appCfg.KeyManagement.SoftHSM.Slot, 
+		appCfg.KeyManagement.SoftHSM.Pin,
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -226,7 +226,7 @@ func main() {
 	}
 
 	keyService := service.NewKeyManagementService(repo)
-	caService := ca_service.NewCaService(caRepo, keyService, caCfg)
+	caService := ca_service.NewCaService(caRepo, keyService, appCfg)
 
 	app := &App{keyService: keyService, caService: caService, db: db}
 

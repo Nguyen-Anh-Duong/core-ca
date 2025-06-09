@@ -5,6 +5,7 @@ import (
 	"core-ca/ca/model"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -32,7 +33,7 @@ func NewRevocationRepository(db *sql.DB) (RevocationRepository, error) {
 	`)
 
 	if err != nil {
-		return nil, errors.New("failed to create revoked_certificates table: " + err.Error())
+		return nil, fmt.Errorf("failed to create revoked_certificates table: %w", err)
 	}
 
 	return &revocationRepository{db: db}, nil

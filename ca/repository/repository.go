@@ -8,9 +8,9 @@ import (
 type Repository interface {
 	RevocationRepository
 	CertificateRepository
-	// TokenRepository
-	// KeyRepository
-	// CARepository
+	TokenRepository
+	KeyRepository
+	CARepository
 }
 
 type repository struct {
