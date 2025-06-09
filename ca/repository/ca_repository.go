@@ -18,38 +18,37 @@ type caRepository struct {
 	db *sql.DB
 }
 
-func NewCARepository(db *sql.DB) (CARepository, error) {
-	if db == nil {
-		return nil, fmt.Errorf("NewCARepository: database connection is nil")
-	}
-
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS certificate_authorities (
-			id SERIAL PRIMARY KEY,
-			name VARCHAR NOT NULL UNIQUE,
-			type VARCHAR NOT NULL CHECK (type IN ('root', 'sub')),
-			parent_ca_id INTEGER,
-			cert_id int NOT NULL,
-			status VARCHAR NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'expired', 'unknown')),
-			CONSTRAINT fk_crypto_token_id FOREIGN KEY (crypto_token_id) REFERENCES crypto_tokens(id),
-			CONSTRAINT fk_parent_ca_id FOREIGN KEY (parent_ca_id) REFERENCES certificate_authorities(id),
-			CONSTRAINT fk_cert_id FOREIGN KEY (cert_id) REFERENCES certificates(id)
-		);
-	`)
-
-	if err != nil {
-		return nil, fmt.Errorf("NewCARepository: failed to create certificate_authorities table: %w", err)
-	}
-
-	return &caRepository{db: db}, nil
-}
-
 func (r *caRepository) SaveCA(ctx context.Context, ca model.CA) (int, error) {
-	return 0, nil
+	query := `
+		INSERT INTO certificate_authorities (name, type, parent_ca_id, cert_pem, status)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id
+	`
+	var id int
+	err := r.db.QueryRowContext(ctx, query, ca.Name, ca.Type, ca.ParentCAID, ca.CertPEM, ca.Status).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("SaveCA: failed to save CA: %w", err)
+	}
+
+	return id, nil
 }
+
 func (r *caRepository) FindCAByID(ctx context.Context, id int) (model.CA, error) {
-	return model.CA{}, nil
+	query := `
+		SELECT id, name, type, parent_ca_id, cert_pem, status
+		FROM certificate_authorities
+		WHERE id = $1 AND status = 'active'
+		AND type IN ('root', 'sub')
+	`
+	var caData model.CA
+	row := r.db.QueryRowContext(ctx, query, id)
+	err := row.Scan(&caData.ID, &caData.Name, &caData.Type, &caData.ParentCAID, &caData.CertPEM, &caData.Status)
+	if err != nil {
+		return model.CA{}, fmt.Errorf("FindCAByID: failed to find CA by ID %d: %w", id, err)
+	}
+	return caData, nil
 }
+
 func (r *caRepository) FindCABySerialNumber(ctx context.Context, serialNumber string) (model.CA, error) {
 	return model.CA{}, nil
 }

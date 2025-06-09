@@ -24,6 +24,52 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/ca/create": {
+            "post": {
+                "description": "Create a new Certificate Authority (CA) - either root CA or subordinate CA",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Create a new Certificate Authority",
+                "parameters": [
+                    {
+                        "description": "CA creation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.CreateCARequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.CreateCAResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/ca/crl": {
             "get": {
                 "description": "Retrieve the current Certificate Revocation List",
@@ -266,6 +312,52 @@ const docTemplate = `{
                 "message": {
                     "type": "string",
                     "example": "Certificate revoked"
+                }
+            }
+        },
+        "main.CreateCARequest": {
+            "type": "object",
+            "required": [
+                "name",
+                "type"
+            ],
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "MyRootCA"
+                },
+                "parent_ca_id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "type": {
+                    "type": "string",
+                    "example": "root"
+                }
+            }
+        },
+        "main.CreateCAResponse": {
+            "type": "object",
+            "properties": {
+                "cert_pem": {
+                    "type": "string",
+                    "example": "-----BEGIN CERTIFICATE-----\n..."
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "message": {
+                    "type": "string",
+                    "example": "CA created successfully"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "MyRootCA"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "root"
                 }
             }
         },

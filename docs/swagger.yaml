@@ -26,6 +26,41 @@ definitions:
         example: Certificate revoked
         type: string
     type: object
+  main.CreateCARequest:
+    properties:
+      name:
+        example: MyRootCA
+        type: string
+      parent_ca_id:
+        example: 1
+        type: integer
+      type:
+        example: root
+        type: string
+    required:
+    - name
+    - type
+    type: object
+  main.CreateCAResponse:
+    properties:
+      cert_pem:
+        example: |-
+          -----BEGIN CERTIFICATE-----
+          ...
+        type: string
+      id:
+        example: 1
+        type: integer
+      message:
+        example: CA created successfully
+        type: string
+      name:
+        example: MyRootCA
+        type: string
+      type:
+        example: root
+        type: string
+    type: object
   main.ErrorResponse:
     properties:
       error:
@@ -71,6 +106,37 @@ info:
   title: Core CA API
   version: "1.0"
 paths:
+  /ca/create:
+    post:
+      consumes:
+      - application/json
+      description: Create a new Certificate Authority (CA) - either root CA or subordinate
+        CA
+      parameters:
+      - description: CA creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.CreateCARequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.CreateCAResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Create a new Certificate Authority
+      tags:
+      - Certificate Authority
   /ca/crl:
     get:
       consumes:

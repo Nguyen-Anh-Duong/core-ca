@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"core-ca/ca/model"
 	ca_repository "core-ca/ca/repository"
 	ca_service "core-ca/ca/service"
@@ -70,6 +71,22 @@ type CertificateRevokeRequest struct {
 // CertificateRevokeResponse represents the response for certificate revocation
 type CertificateRevokeResponse struct {
 	Message string `json:"message" example:"Certificate revoked"`
+}
+
+// CreateCARequest represents the request for creating a new CA
+type CreateCARequest struct {
+	Name       string `json:"name" binding:"required" example:"MyRootCA"`
+	Type       string `json:"type" binding:"required" example:"root"`
+	ParentCAID *int   `json:"parent_ca_id,omitempty" example:"1"`
+}
+
+// CreateCAResponse represents the response for CA creation
+type CreateCAResponse struct {
+	ID      int    `json:"id" example:"1"`
+	Name    string `json:"name" example:"MyRootCA"`
+	Type    string `json:"type" example:"root"`
+	CertPEM string `json:"cert_pem" example:"-----BEGIN CERTIFICATE-----\n..."`
+	Message string `json:"message" example:"CA created successfully"`
 }
 
 // ErrorResponse represents an error response
@@ -195,6 +212,52 @@ func (app *App) GetCRL(c *gin.Context) {
 	c.Data(http.StatusOK, "application/x-pem-file", crlPEM)
 }
 
+// @Summary Create a new Certificate Authority
+// @Description Create a new Certificate Authority (CA) - either root CA or subordinate CA
+// @Tags Certificate Authority
+// @Accept json
+// @Produce json
+// @Param request body CreateCARequest true "CA creation request"
+// @Success 200 {object} CreateCAResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /ca/create [post]
+func (app *App) CreateCA(c *gin.Context) {
+	var req CreateCARequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	ctx := context.Background()
+	
+	// Convert string type to model.CAType
+	var caType model.CAType
+	switch req.Type {
+	case "root":
+		caType = model.RootCAType
+	case "sub":
+		caType = model.SubordinateCAType
+	default:
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid CA type. Must be 'root' or 'sub'"})
+		return
+	}
+	
+	// Create a new CA
+	ca, err := app.caService.CreateCA(ctx, req.Name, caType, req.ParentCAID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, CreateCAResponse{
+		ID:      ca.ID,
+		Name:    ca.Name,
+		Type:    req.Type,
+		CertPEM: ca.CertPEM,
+		Message: "CA created successfully",
+	})
+}
+
 func main() {
 	// Load unified config
 	appCfg, err := config.LoadConfig()
@@ -213,8 +276,8 @@ func main() {
 	}
 
 	repo, err := repository.NewSoftHsmKeyPairRepository(
-		appCfg.KeyManagement.SoftHSM.Module, 
-		appCfg.KeyManagement.SoftHSM.Slot, 
+		appCfg.KeyManagement.SoftHSM.Module,
+		appCfg.KeyManagement.SoftHSM.Slot,
 		appCfg.KeyManagement.SoftHSM.Pin,
 	)
 	if err != nil {
@@ -238,9 +301,11 @@ func main() {
 
 	r.POST("/keymanagement/generate", app.GenerateKeyPair)
 	r.GET("/keymanagement/:id", app.GetKeyPair)
+
 	r.POST("/ca/issue", app.IssueCertificate)
 	r.POST("/ca/revoke", app.RevokeCertificate)
 	r.GET("/ca/crl", app.GetCRL)
+	r.POST("/ca/create", app.CreateCA)
 
 	go func() {
 		if err := r.Run(":8080"); err != nil {

@@ -310,10 +310,10 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 	}
 
 	//save key pair metadata
-	publicKeyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA Public Key",
-		Bytes: x509.MarshalPKCS1PublicKey(keyPair.PublicKey),
-	})
+	// publicKeyPEM := pem.EncodeToMemory(&pem.Block{
+	// 	Type:  "RSA Public Key",
+	// 	Bytes: x509.MarshalPKCS1PublicKey(keyPair.PublicKey),
+	// })
 
 	// key := model.CryptoKey{
 	// 	Label:     keyLabel,
@@ -350,10 +350,9 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 		},
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
-		KeyUsage:              x509.KeyUsageCRLSign | x509.KeyUsageCertSign,
+		KeyUsage:              x509.KeyUsageCRLSign | x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		IsCA:                  true,
 		BasicConstraintsValid: true,
-		MaxPathLen:            0,
 		SubjectKeyId: func() []byte {
 			pubKeyBytes, err := x509.MarshalPKIXPublicKey(keyPair.PublicKey)
 			if err != nil {
@@ -380,32 +379,57 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to create self-signed certificate: %v", err)
 		}
-	} else {
-		// Create intermediate CA signed by parent CA
+	} else { // Create intermediate CA signed by parent CA
+		CAcertTemplate.MaxPathLen = 0
 		parentCA, err := s.repo.FindCAByID(ctx, *parentCAID)
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to get parent CA: %v", err)
 		}
 
-		parentKey, err := s.keyService.GetSigner(parentCA.Name + "-Key")
+		signer, err := s.keyService.GetSigner(parentCA.Name + "-Key")
+		if err != nil {
+			return model.CA{}, fmt.Errorf("failed to get signer for parent CA key: %w", err)
+		}
+
+		block, _ := pem.Decode([]byte(parentCA.CertPEM))
+		if block == nil || block.Type != "CERTIFICATE" {
+			return model.CA{}, fmt.Errorf("failed to decode PEM block containing certificate")
+		}
+		parentCert, err := x509.ParseCertificate(block.Bytes)
+
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to get parent CA key: %v", err)
 		}
 
-		signedCert, err = x509.CreateCertificate(rand.Reader, &CAcertTemplate, &CAcertTemplate, keyPair.PublicKey, parentKey)
+		signedCert, err = x509.CreateCertificate(rand.Reader, &CAcertTemplate, parentCert, keyPair.PublicKey, signer)
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to create intermediate CA certificate: %v", err)
 		}
 	}
 
-	fmt.Println(signedCert, publicKeyPEM)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: signedCert})
+	// Save CA
+	ca := model.CA{
+		Name:       name,
+		Type:       caType,
+		ParentCAID: parentCAID,
+		CertPEM:    string(certPEM),
+		Status:     "active",
+		CreateAt:   notBefore,
+	}
 
-	// save ca
-	// ca := model.CA{
-	// 	Name: name,
-	// 	Type: caType,
+	caID, err := s.repo.SaveCA(ctx, ca)
+	if err != nil {
+		return model.CA{}, fmt.Errorf("failed to save CA: %w", err)
+	}
+	// fmt.Println(ca.CertPEM)
 
+	// Update key with ca_id
+	// key.CAID = &caID
+	// _, err = s.repo.SaveKey(ctx, key)
+	// if err != nil {
+	//     return model.CA{}, err
 	// }
-
-	return model.CA{}, nil
+	ca.ID = caID
+	return ca, nil
 }

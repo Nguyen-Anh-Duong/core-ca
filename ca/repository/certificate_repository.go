@@ -5,11 +5,13 @@ import (
 	"core-ca/ca/model"
 	"database/sql"
 	"errors"
+	"fmt"
 )
 
 type CertificateRepository interface {
 	SaveCert(ctx context.Context, certData model.Certificate) error
 	FindBySerialNumber(ctx context.Context, serialNumber string) (model.Certificate, error)
+	FindCertByCAID(ctx context.Context, id int) (model.Certificate, error)
 }
 
 type certificateRepository struct {
@@ -27,7 +29,7 @@ func NewCertificateRepository(db *sql.DB) (CertificateRepository, error) {
             subject VARCHAR NOT NULL,
             not_before TIMESTAMP NOT NULL,
             not_after TIMESTAMP NOT NULL,
-            cert_pem TEXT NOT NULL
+            cert_pem TEXT NOT NULL,
 			ca_id INTEGER,
 			status VARCHAR NOT NULL DEFAULT 'valid' CHECK (status IN ('valid', 'revoked', 'expired', 'unknown')),
 			CONSTRAINT fk_ca_id FOREIGN KEY (ca_id) REFERENCES certificate_authorities(id),
@@ -67,6 +69,24 @@ func (r *certificateRepository) FindBySerialNumber(ctx context.Context, serialNu
 			return model.Certificate{}, nil // No certificate found
 		}
 		return model.Certificate{}, err // Other error
+	}
+	return certData, nil
+}
+
+func (r *certificateRepository) FindCertByCAID(ctx context.Context, caID int) (model.Certificate, error) {
+	var certData model.Certificate
+	row := r.db.QueryRowContext(ctx, `
+		SELECT serial_number, subject, not_before, not_after, cert_pem, status, ca_id
+		FROM certificates
+		WHERE ca_id = $1 AND status = 'valid'
+	`, caID)
+
+	err := row.Scan(&certData.SerialNumber, &certData.Subject, &certData.NotBefore, &certData.NotAfter, &certData.CertPEM, &certData.Status, &certData.CAID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return model.Certificate{}, nil // No certificate found
+		}
+		return model.Certificate{}, fmt.Errorf("FindCertByCAID: %w", err) // Other error
 	}
 	return certData, nil
 }
