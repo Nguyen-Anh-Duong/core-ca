@@ -315,6 +315,57 @@ func (app *App) CreateCA(c *gin.Context) {
 	})
 }
 
+// @Summary Handle OCSP request
+// @Description Handle Online Certificate Status Protocol requests to check certificate status
+// @Tags Certificate Authority  
+// @Accept application/ocsp-request
+// @Produce application/ocsp-response
+// @Param ca_id query int true "Certificate Authority ID"
+// @Param request body string true "OCSP request in DER format"
+// @Success 200 {string} string "OCSP response in DER format"
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /ocsp [post]
+func (app *App) HandleOCSP(c *gin.Context) {
+	ctx := context.Background()
+	
+	caIDStr := c.Query("ca_id")
+	if caIDStr == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "ca_id parameter is required"})
+		return
+	}
+	
+	caID := 0
+	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
+		return
+	}
+	
+	// Read OCSP request from body
+	requestData, err := c.GetRawData()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "failed to read request body"})
+		return
+	}
+	
+	if len(requestData) == 0 {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "empty OCSP request"})
+		return
+	}
+	
+	// Handle OCSP request
+	responseData, err := app.caService.HandleOCSPRequest(ctx, requestData, caID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	// Set proper headers for OCSP response
+	c.Header("Content-Type", "application/ocsp-response")
+	c.Header("Cache-Control", "max-age=86400") // Cache for 24 hours
+	c.Data(http.StatusOK, "application/ocsp-response", responseData)
+}
+
 func main() {
 	// Load unified config
 	appCfg, err := config.LoadConfig()
@@ -364,6 +415,7 @@ func main() {
 	r.GET("/ca/crl", app.GetCRL)
 	r.GET("/crl.pem", app.GetCRLFile)
 	r.POST("/ca/create", app.CreateCA)
+	r.POST("/ocsp", app.HandleOCSP)
 
 	go func() {
 		if err := r.Run(":8080"); err != nil {

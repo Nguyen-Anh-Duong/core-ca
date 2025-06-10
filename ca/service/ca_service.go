@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"math/big"
 	"time"
+
+	"golang.org/x/crypto/ocsp"
 )
 
 type CaService interface {
@@ -32,6 +34,7 @@ type CaService interface {
 	RevokeCertificate(ctx context.Context, serialNumber string, reason model.RevocationReason) error
 	GetCRL(ctx context.Context, caID int) ([]byte, error)
 	// GetCertificateStatus(ctx context.Context, serialNumber string) (model.CertificateStatus, error)
+	HandleOCSPRequest(ctx context.Context, requestData []byte, caID int) ([]byte, error)
 }
 
 type caService struct {
@@ -413,4 +416,109 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 	// }
 	ca.ID = caID
 	return ca, nil
+}
+
+func (s *caService) HandleOCSPRequest(ctx context.Context, requestData []byte, caID int) ([]byte, error) {
+	// Parse OCSP request
+	ocspReq, err := ocsp.ParseRequest(requestData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse OCSP request: %w", err)
+	}
+
+	// Get CA certificate and key
+	ca, err := s.repo.FindCAByID(ctx, caID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find CA: %w", err)
+	}
+
+	// Parse CA certificate
+	block, _ := pem.Decode([]byte(ca.CertPEM))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("failed to decode CA certificate PEM block")
+	}
+	caCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CA certificate: %v", err)
+	}
+
+	// Get signer for OCSP response
+	signer, err := s.keyService.GetSigner(ca.Name + "-Key")
+	if err != nil {
+		return nil, fmt.Errorf("failed to get CA signer: %w", err)
+	}
+
+	// Convert serial number to string for database lookup
+	serialNumber := ocspReq.SerialNumber.String()
+
+	// Check if certificate exists
+	cert, err := s.repo.FindBySerialNumber(ctx, serialNumber)
+	if err != nil {
+		// Certificate not found - return unknown status
+		response := ocsp.Response{
+			Status:       ocsp.Unknown,
+			SerialNumber: ocspReq.SerialNumber,
+			ThisUpdate:   time.Now(),
+			NextUpdate:   time.Now().Add(24 * time.Hour),
+		}
+		return ocsp.CreateResponse(caCert, caCert, response, signer)
+	}
+
+	// Check if certificate is revoked
+	revokedCert, isRevoked, err := s.repo.IsRevoked(ctx, serialNumber)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check revocation status: %w", err)
+	}
+
+	var response ocsp.Response
+	if isRevoked {
+		// Certificate is revoked
+		reasonCode := getOCSPReasonCode(revokedCert.Reason)
+		response = ocsp.Response{
+			Status:           ocsp.Revoked,
+			SerialNumber:     ocspReq.SerialNumber,
+			ThisUpdate:       time.Now(),
+			NextUpdate:       time.Now().Add(24 * time.Hour),
+			RevokedAt:        revokedCert.RevocationDate,
+			RevocationReason: reasonCode,
+		}
+	} else {
+		// Check if certificate is expired
+		if time.Now().After(cert.NotAfter) {
+			response = ocsp.Response{
+				Status:       ocsp.Unknown, // Expired certificates can be reported as unknown
+				SerialNumber: ocspReq.SerialNumber,
+				ThisUpdate:   time.Now(),
+				NextUpdate:   time.Now().Add(24 * time.Hour),
+			}
+		} else {
+			// Certificate is good
+			response = ocsp.Response{
+				Status:       ocsp.Good,
+				SerialNumber: ocspReq.SerialNumber,
+				ThisUpdate:   time.Now(),
+				NextUpdate:   time.Now().Add(24 * time.Hour),
+			}
+		}
+	}
+
+	// Create and sign OCSP response
+	return ocsp.CreateResponse(caCert, caCert, response, signer)
+}
+
+// Helper function to convert RevocationReason to OCSP reason code
+func getOCSPReasonCode(reason model.RevocationReason) int {
+	reasonMap := map[model.RevocationReason]int{
+		model.ReasonUnspecified:          ocsp.Unspecified,
+		model.ReasonKeyCompromise:        ocsp.KeyCompromise,
+		model.ReasonCACompromise:         ocsp.CACompromise,
+		model.ReasonAffiliationChanged:   ocsp.AffiliationChanged,
+		model.ReasonSuperseded:           ocsp.Superseded,
+		model.ReasonCessationOfOperation: ocsp.CessationOfOperation,
+		model.ReasonCertificateHold:      ocsp.CertificateHold,
+	}
+	
+	if code, exists := reasonMap[reason]; exists {
+		return code
+	}
+	return ocsp.Unspecified
 }

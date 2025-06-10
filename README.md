@@ -9,6 +9,7 @@ A Go-based Certificate Authority service using PKCS#11 (SoftHSM) for secure key 
 - 🏛️ **CA Hierarchy**: Support for Root CA and Subordinate CA creation
 - 🚫 **Certificate Revocation**: Revoke certificates with reason codes
 - 📋 **Certificate Revocation List (CRL)**: Generate CA-specific CRLs
+- 🔍 **OCSP Support**: Online Certificate Status Protocol for real-time status checking
 - 🗄️ **Database Storage**: PostgreSQL for certificate and CA metadata storage
 - 🔒 **Crypto Standards**: PKCS#1 v1.5 signatures with proper DigestInfo handling
 - 📖 **API Documentation**: Swagger/OpenAPI documentation
@@ -197,6 +198,23 @@ curl "http://localhost:8080/crl.pem?ca_id=1" \
 # GET http://localhost:8080/crl.pem?ca_id=1
 ```
 
+#### Check Certificate Status via OCSP
+
+```bash
+# Create OCSP request using OpenSSL
+SERIAL_NUMBER="123456789"  # Serial number to check
+openssl ocsp -issuer ca.crt -serial $SERIAL_NUMBER -reqout ocsp_request.der
+
+# Send OCSP request to server
+curl -X POST "http://localhost:8080/ocsp?ca_id=1" \
+  -H "Content-Type: application/ocsp-request" \
+  --data-binary @ocsp_request.der \
+  --output ocsp_response.der
+
+# Verify OCSP response
+openssl ocsp -respin ocsp_response.der -text -CAfile ca.crt
+```
+
 ## Complete API Reference
 
 | Method | Endpoint                  | Description           | Parameters                                                     |
@@ -208,6 +226,7 @@ curl "http://localhost:8080/crl.pem?ca_id=1" \
 | `POST` | `/ca/revoke`              | Revoke certificate    | `{"serial_number": "string", "reason": "string"}`              |
 | `GET`  | `/ca/crl`                 | Get CRL (JSON)        | Query: `ca_id`                                                 |
 | `GET`  | `/crl.pem`                | Get CRL (file)        | Query: `ca_id`                                                 |
+| `POST` | `/ocsp`                   | OCSP status check     | Query: `ca_id`, Body: OCSP request (DER)                       |
 | `GET`  | `/swagger/*`              | API documentation     | -                                                              |
 
 ## Database Schema
@@ -341,6 +360,15 @@ curl "http://localhost:8080/crl.pem?ca_id=1" --output ca.crl
 
 # 9. Verify CRL
 openssl crl -in ca.crl -text -noout
+
+# 10. Check certificate status via OCSP
+SERIAL=$(openssl x509 -in client.crt -serial -noout | cut -d= -f2)
+openssl ocsp -issuer ca.crt -serial $SERIAL -reqout ocsp_request.der
+curl -X POST "http://localhost:8080/ocsp?ca_id=1" \
+  -H "Content-Type: application/ocsp-request" \
+  --data-binary @ocsp_request.der \
+  --output ocsp_response.der
+openssl ocsp -respin ocsp_response.der -text -CAfile ca.crt
 ```
 
 ## Troubleshooting

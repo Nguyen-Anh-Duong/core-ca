@@ -333,6 +333,59 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/ocsp": {
+            "post": {
+                "description": "Handle Online Certificate Status Protocol requests to check certificate status",
+                "consumes": [
+                    "application/ocsp-request"
+                ],
+                "produces": [
+                    "application/ocsp-response"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Handle OCSP request",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Certificate Authority ID",
+                        "name": "ca_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "OCSP request in DER format",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OCSP response in DER format",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
