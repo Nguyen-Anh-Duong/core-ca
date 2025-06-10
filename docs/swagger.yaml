@@ -269,6 +269,36 @@ paths:
       summary: Revoke a certificate
       tags:
       - Certificate Authority
+  /crl.pem:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve the current Certificate Revocation List in standard CRL
+        format
+      parameters:
+      - description: Certificate Authority ID
+        in: query
+        name: ca_id
+        required: true
+        type: integer
+      produces:
+      - application/pkix-crl
+      responses:
+        "200":
+          description: CRL in PEM format
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Get Certificate Revocation List (CRL) as file
+      tags:
+      - Certificate Authority
   /keymanagement/{id}:
     get:
       consumes:

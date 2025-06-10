@@ -184,13 +184,17 @@ curl -X POST http://localhost:8080/ca/revoke \
 #### Get Certificate Revocation List (CRL)
 
 ```bash
-# Get CRL for specific CA
+# Get CRL for specific CA (JSON format)
 curl "http://localhost:8080/ca/crl?ca_id=1" \
   -H "Accept: application/x-pem-file" \
   --output ca1.crl
 
+# Get CRL as downloadable file (standard format)
+curl "http://localhost:8080/crl.pem?ca_id=1" \
+  --output ca1.crl
+
 # Or use in browser/Postman
-# GET http://localhost:8080/ca/crl?ca_id=1
+# GET http://localhost:8080/crl.pem?ca_id=1
 ```
 
 ## Complete API Reference
@@ -202,7 +206,8 @@ curl "http://localhost:8080/ca/crl?ca_id=1" \
 | `POST` | `/ca/create`              | Create new CA         | `{"name": "string", "type": "root\|sub", "parent_ca_id": int}` |
 | `POST` | `/ca/issue`               | Issue certificate     | `{"csr": "string", "ca_id": int}`                              |
 | `POST` | `/ca/revoke`              | Revoke certificate    | `{"serial_number": "string", "reason": "string"}`              |
-| `GET`  | `/ca/crl`                 | Get CRL               | Query: `ca_id`                                                 |
+| `GET`  | `/ca/crl`                 | Get CRL (JSON)        | Query: `ca_id`                                                 |
+| `GET`  | `/crl.pem`                | Get CRL (file)        | Query: `ca_id`                                                 |
 | `GET`  | `/swagger/*`              | API documentation     | -                                                              |
 
 ## Database Schema
@@ -332,7 +337,7 @@ curl -X POST http://localhost:8080/ca/revoke \
   -d "{\"serial_number\": \"$SERIAL\", \"reason\": \"keyCompromise\"}"
 
 # 8. Get CRL
-curl "http://localhost:8080/ca/crl?ca_id=1" --output ca.crl
+curl "http://localhost:8080/crl.pem?ca_id=1" --output ca.crl
 
 # 9. Verify CRL
 openssl crl -in ca.crl -text -noout

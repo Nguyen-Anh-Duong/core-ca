@@ -199,6 +199,43 @@ func (app *App) RevokeCertificate(c *gin.Context) {
 	c.JSON(http.StatusOK, CertificateRevokeResponse{Message: "Certificate revoked"})
 }
 
+// @Summary Get Certificate Revocation List (CRL) as file
+// @Description Retrieve the current Certificate Revocation List in standard CRL format
+// @Tags Certificate Authority
+// @Accept json
+// @Produce application/pkix-crl
+// @Param ca_id query int true "Certificate Authority ID"
+// @Success 200 {string} string "CRL in PEM format"
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /crl.pem [get]
+func (app *App) GetCRLFile(c *gin.Context) {
+	ctx := context.Background()
+	
+	caIDStr := c.Query("ca_id")
+	if caIDStr == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "ca_id parameter is required"})
+		return
+	}
+	
+	caID := 0
+	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
+		return
+	}
+	
+	crlPEM, err := app.caService.GetCRL(ctx, caID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	// Set proper headers for CRL file
+	c.Header("Content-Type", "application/pkix-crl")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"ca-%d-crl.pem\"", caID))
+	c.Data(http.StatusOK, "application/pkix-crl", crlPEM)
+}
+
 // @Summary Get Certificate Revocation List (CRL)
 // @Description Retrieve the current Certificate Revocation List
 // @Tags Certificate Authority
@@ -325,6 +362,7 @@ func main() {
 	r.POST("/ca/issue", app.IssueCertificate)
 	r.POST("/ca/revoke", app.RevokeCertificate)
 	r.GET("/ca/crl", app.GetCRL)
+	r.GET("/crl.pem", app.GetCRLFile)
 	r.POST("/ca/create", app.CreateCA)
 
 	go func() {

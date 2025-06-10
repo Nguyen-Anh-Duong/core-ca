@@ -200,6 +200,50 @@
                 }
             }
         },
+        "/crl.pem": {
+            "get": {
+                "description": "Retrieve the current Certificate Revocation List in standard CRL format",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/pkix-crl"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Get Certificate Revocation List (CRL) as file",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Certificate Authority ID",
+                        "name": "ca_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "CRL in PEM format",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/keymanagement/generate": {
             "post": {
                 "description": "Generate a new RSA key pair with the specified ID",
