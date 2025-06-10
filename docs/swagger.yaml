@@ -1,5 +1,38 @@
 basePath: /
 definitions:
+  main.CAChainResponse:
+    properties:
+      chain:
+        items:
+          $ref: '#/definitions/model.CA'
+        type: array
+    type: object
+  main.CAListResponse:
+    properties:
+      cas:
+        items:
+          $ref: '#/definitions/model.CA'
+        type: array
+      total:
+        example: 5
+        type: integer
+    type: object
+  main.CARevokeRequest:
+    properties:
+      reason:
+        example: keyCompromise
+        type: string
+    required:
+    - reason
+    type: object
+  main.CAUpdateStatusRequest:
+    properties:
+      status:
+        example: revoked
+        type: string
+    required:
+    - status
+    type: object
   main.CertificateIssueRequest:
     properties:
       ca_id:
@@ -99,6 +132,52 @@ definitions:
           ...
         type: string
     type: object
+  model.CA:
+    properties:
+      cert_pem:
+        description: PEM-encoded certificate
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      name:
+        description: e.g., "RootCA"
+        type: string
+      parent_ca_id:
+        description: |-
+          CryptoTokenID int       `json:"crypto_token_id"`
+          CertID     int       `json:"cert_id"` // ID of the certificate in the database
+        type: integer
+      status:
+        allOf:
+        - $ref: '#/definitions/model.CAStatus'
+        description: '"active" , "revoked", "expired", "unknown"'
+      type:
+        allOf:
+        - $ref: '#/definitions/model.CAType'
+        description: '"ROOT" or "INTERMEDIATE"'
+    type: object
+  model.CAStatus:
+    enum:
+    - active
+    - revoked
+    - expired
+    - unknown
+    type: string
+    x-enum-varnames:
+    - ActiveCAStatuc
+    - RevokedCaStatus
+    - ExpiredCaStatus
+    - UnknownCaStatus
+  model.CAType:
+    enum:
+    - root
+    - sub
+    type: string
+    x-enum-varnames:
+    - RootCAType
+    - SubordinateCAType
   model.Certificate:
     properties:
       ca_id:
@@ -149,6 +228,191 @@ info:
   title: Core CA API
   version: "1.0"
 paths:
+  /ca:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve all Certificate Authorities
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.CAListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Get all Certificate Authorities
+      tags:
+      - Certificate Authority
+  /ca/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Soft delete a Certificate Authority (mark as deleted)
+      parameters:
+      - description: CA ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Delete a Certificate Authority
+      tags:
+      - Certificate Authority
+    get:
+      consumes:
+      - application/json
+      description: Retrieve a specific Certificate Authority by its ID
+      parameters:
+      - description: CA ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.CA'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Get a Certificate Authority by ID
+      tags:
+      - Certificate Authority
+  /ca/{id}/chain:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve the certificate chain for a specific CA (from CA to root)
+      parameters:
+      - description: CA ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.CAChainResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Get Certificate Authority chain
+      tags:
+      - Certificate Authority
+  /ca/{id}/revoke:
+    post:
+      consumes:
+      - application/json
+      description: Revoke a Certificate Authority with a specified reason
+      parameters:
+      - description: CA ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: CA revocation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.CARevokeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Revoke a Certificate Authority
+      tags:
+      - Certificate Authority
+  /ca/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: Update the status of a Certificate Authority
+      parameters:
+      - description: CA ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Status update request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/main.CAUpdateStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Update Certificate Authority status
+      tags:
+      - Certificate Authority
   /ca/create:
     post:
       consumes:

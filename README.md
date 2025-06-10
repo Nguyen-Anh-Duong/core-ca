@@ -141,6 +141,46 @@ curl -X POST http://localhost:8080/ca/create \
   }'
 ```
 
+#### List All CAs
+
+```bash
+curl http://localhost:8080/ca
+```
+
+#### Get Specific CA
+
+```bash
+curl http://localhost:8080/ca/1
+```
+
+#### Get CA Certificate Chain
+
+```bash
+curl http://localhost:8080/ca/1/chain
+```
+
+#### Update CA Status
+
+```bash
+curl -X PUT http://localhost:8080/ca/1/status \
+  -H "Content-Type: application/json" \
+  -d '{"status": "expired"}'
+```
+
+#### Revoke CA
+
+```bash
+curl -X POST http://localhost:8080/ca/1/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "keyCompromise"}'
+```
+
+#### Delete CA (Soft Delete)
+
+```bash
+curl -X DELETE http://localhost:8080/ca/1
+```
+
 ### Certificate Operations
 
 #### Issue Certificate
@@ -217,17 +257,23 @@ openssl ocsp -respin ocsp_response.der -text -CAfile ca.crt
 
 ## Complete API Reference
 
-| Method | Endpoint                  | Description           | Parameters                                                     |
-| ------ | ------------------------- | --------------------- | -------------------------------------------------------------- |
-| `POST` | `/keymanagement/generate` | Generate new key pair | `{"id": "string"}`                                             |
-| `GET`  | `/keymanagement/{id}`     | Get public key        | Path: `id`                                                     |
-| `POST` | `/ca/create`              | Create new CA         | `{"name": "string", "type": "root\|sub", "parent_ca_id": int}` |
-| `POST` | `/ca/issue`               | Issue certificate     | `{"csr": "string", "ca_id": int}`                              |
-| `POST` | `/ca/revoke`              | Revoke certificate    | `{"serial_number": "string", "reason": "string"}`              |
-| `GET`  | `/ca/crl`                 | Get CRL (JSON)        | Query: `ca_id`                                                 |
-| `GET`  | `/crl.pem`                | Get CRL (file)        | Query: `ca_id`                                                 |
-| `POST` | `/ocsp`                   | OCSP status check     | Query: `ca_id`, Body: OCSP request (DER)                       |
-| `GET`  | `/swagger/*`              | API documentation     | -                                                              |
+| Method   | Endpoint                  | Description              | Parameters                                                     |
+| -------- | ------------------------- | ------------------------ | -------------------------------------------------------------- |
+| `POST`   | `/keymanagement/generate` | Generate new key pair    | `{"id": "string"}`                                             |
+| `GET`    | `/keymanagement/{id}`     | Get public key           | Path: `id`                                                     |
+| `POST`   | `/ca/create`              | Create new CA            | `{"name": "string", "type": "root\|sub", "parent_ca_id": int}` |
+| `GET`    | `/ca`                     | List all CAs             | -                                                              |
+| `GET`    | `/ca/{id}`                | Get CA by ID             | Path: `id`                                                     |
+| `GET`    | `/ca/{id}/chain`          | Get CA certificate chain | Path: `id`                                                     |
+| `PUT`    | `/ca/{id}/status`         | Update CA status         | Path: `id`, Body: `{"status": "string"}`                       |
+| `POST`   | `/ca/{id}/revoke`         | Revoke CA                | Path: `id`, Body: `{"reason": "string"}`                       |
+| `DELETE` | `/ca/{id}`                | Delete CA (soft)         | Path: `id`                                                     |
+| `POST`   | `/ca/issue`               | Issue certificate        | `{"csr": "string", "ca_id": int}`                              |
+| `POST`   | `/ca/revoke`              | Revoke certificate       | `{"serial_number": "string", "reason": "string"}`              |
+| `GET`    | `/ca/crl`                 | Get CRL (JSON)           | Query: `ca_id`                                                 |
+| `GET`    | `/crl.pem`                | Get CRL (file)           | Query: `ca_id`                                                 |
+| `POST`   | `/ocsp`                   | OCSP status check        | Query: `ca_id`, Body: OCSP request (DER)                       |
+| `GET`    | `/swagger/*`              | API documentation        | -                                                              |
 
 ## Database Schema
 
@@ -332,43 +378,57 @@ curl -X POST http://localhost:8080/ca/create \
   -H "Content-Type: application/json" \
   -d '{"name": "RootCA", "type": "root"}'
 
-# 3. Generate end-entity key pair
+# 3. Create Subordinate CA
+curl -X POST http://localhost:8080/keymanagement/generate \
+  -H "Content-Type: application/json" \
+  -d '{"id": "SubCA-Key"}'
+
+curl -X POST http://localhost:8080/ca/create \
+  -H "Content-Type: application/json" \
+  -d '{"name": "SubCA", "type": "sub", "parent_ca_id": 1}'
+
+# 4. View CA hierarchy
+curl http://localhost:8080/ca                    # List all CAs
+curl http://localhost:8080/ca/2/chain           # Get SubCA chain (SubCA -> RootCA)
+curl http://localhost:8080/ca/1/chain           # Get RootCA chain (only RootCA)
+
+# 5. Generate end-entity key pair
 openssl genrsa -out client.key 2048
 
-# 4. Create CSR
+# 6. Create CSR
 openssl req -new -key client.key -out client.csr \
   -subj "/C=VN/O=MyOrg/CN=client.example.com"
 
-# 5. Issue certificate
+# 7. Issue certificate from SubCA
 CSR_CONTENT=$(cat client.csr | tr -d '\n')
 curl -X POST http://localhost:8080/ca/issue \
   -H "Content-Type: application/json" \
-  -d "{\"csr\": \"$CSR_CONTENT\", \"ca_id\": 1}" \
+  -d "{\"csr\": \"$CSR_CONTENT\", \"ca_id\": 2}" \
   --output client.crt
 
-# 6. Verify certificate
+# 8. Verify certificate chain
 openssl x509 -in client.crt -text -noout
 
-# 7. Revoke certificate (if needed)
-SERIAL=$(openssl x509 -in client.crt -serial -noout | cut -d= -f2)
-curl -X POST http://localhost:8080/ca/revoke \
+# 9. Revoke SubCA (affects all certificates issued by it)
+curl -X POST http://localhost:8080/ca/2/revoke \
   -H "Content-Type: application/json" \
-  -d "{\"serial_number\": \"$SERIAL\", \"reason\": \"keyCompromise\"}"
+  -d '{"reason": "keyCompromise"}'
 
-# 8. Get CRL
-curl "http://localhost:8080/crl.pem?ca_id=1" --output ca.crl
+# 10. Check CA status
+curl http://localhost:8080/ca/2                 # Should show status: "revoked"
 
-# 9. Verify CRL
-openssl crl -in ca.crl -text -noout
+# 11. Get CRL from Root CA (includes revoked SubCA)
+curl "http://localhost:8080/crl.pem?ca_id=1" --output root-ca.crl
+openssl crl -in root-ca.crl -text -noout
 
-# 10. Check certificate status via OCSP
+# 12. OCSP check for any certificate
 SERIAL=$(openssl x509 -in client.crt -serial -noout | cut -d= -f2)
-openssl ocsp -issuer ca.crt -serial $SERIAL -reqout ocsp_request.der
-curl -X POST "http://localhost:8080/ocsp?ca_id=1" \
+openssl ocsp -issuer subca.crt -serial $SERIAL -reqout ocsp_request.der
+curl -X POST "http://localhost:8080/ocsp?ca_id=2" \
   -H "Content-Type: application/ocsp-request" \
   --data-binary @ocsp_request.der \
   --output ocsp_response.der
-openssl ocsp -respin ocsp_response.der -text -CAfile ca.crt
+openssl ocsp -respin ocsp_response.der -text -CAfile subca.crt
 ```
 
 ## Troubleshooting

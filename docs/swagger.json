@@ -18,6 +18,35 @@
     "host": "localhost:8080",
     "basePath": "/",
     "paths": {
+        "/ca": {
+            "get": {
+                "description": "Retrieve all Certificate Authorities",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Get all Certificate Authorities",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.CAListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/ca/create": {
             "post": {
                 "description": "Create a new Certificate Authority (CA) - either root CA or subordinate CA",
@@ -183,6 +212,257 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/main.CertificateRevokeResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ca/{id}": {
+            "get": {
+                "description": "Retrieve a specific Certificate Authority by its ID",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Get a Certificate Authority by ID",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "CA ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.CA"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Soft delete a Certificate Authority (mark as deleted)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Delete a Certificate Authority",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "CA ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ca/{id}/chain": {
+            "get": {
+                "description": "Retrieve the certificate chain for a specific CA (from CA to root)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Get Certificate Authority chain",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "CA ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.CAChainResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ca/{id}/revoke": {
+            "post": {
+                "description": "Revoke a Certificate Authority with a specified reason",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Revoke a Certificate Authority",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "CA ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "CA revocation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.CARevokeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/ca/{id}/status": {
+            "put": {
+                "description": "Update the status of a Certificate Authority",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Update Certificate Authority status",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "CA ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Status update request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/main.CAUpdateStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     },
                     "400": {
@@ -383,6 +663,56 @@
         }
     },
     "definitions": {
+        "main.CAChainResponse": {
+            "type": "object",
+            "properties": {
+                "chain": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.CA"
+                    }
+                }
+            }
+        },
+        "main.CAListResponse": {
+            "type": "object",
+            "properties": {
+                "cas": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.CA"
+                    }
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 5
+                }
+            }
+        },
+        "main.CARevokeRequest": {
+            "type": "object",
+            "required": [
+                "reason"
+            ],
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "example": "keyCompromise"
+                }
+            }
+        },
+        "main.CAUpdateStatusRequest": {
+            "type": "object",
+            "required": [
+                "status"
+            ],
+            "properties": {
+                "status": {
+                    "type": "string",
+                    "example": "revoked"
+                }
+            }
+        },
         "main.CertificateIssueRequest": {
             "type": "object",
             "required": [
@@ -514,6 +844,71 @@
                     "example": "-----BEGIN RSA PUBLIC KEY-----\n..."
                 }
             }
+        },
+        "model.CA": {
+            "type": "object",
+            "properties": {
+                "cert_pem": {
+                    "description": "PEM-encoded certificate",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "description": "e.g., \"RootCA\"",
+                    "type": "string"
+                },
+                "parent_ca_id": {
+                    "description": "CryptoTokenID int       `json:\"crypto_token_id\"`\nCertID     int       `json:\"cert_id\"` // ID of the certificate in the database",
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "\"active\" , \"revoked\", \"expired\", \"unknown\"",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.CAStatus"
+                        }
+                    ]
+                },
+                "type": {
+                    "description": "\"ROOT\" or \"INTERMEDIATE\"",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.CAType"
+                        }
+                    ]
+                }
+            }
+        },
+        "model.CAStatus": {
+            "type": "string",
+            "enum": [
+                "active",
+                "revoked",
+                "expired",
+                "unknown"
+            ],
+            "x-enum-varnames": [
+                "ActiveCAStatuc",
+                "RevokedCaStatus",
+                "ExpiredCaStatus",
+                "UnknownCaStatus"
+            ]
+        },
+        "model.CAType": {
+            "type": "string",
+            "enum": [
+                "root",
+                "sub"
+            ],
+            "x-enum-varnames": [
+                "RootCAType",
+                "SubordinateCAType"
+            ]
         },
         "model.Certificate": {
             "type": "object",

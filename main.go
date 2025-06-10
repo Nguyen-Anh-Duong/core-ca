@@ -96,6 +96,27 @@ type ErrorResponse struct {
 	Error string `json:"error" example:"Invalid request"`
 }
 
+// CAListResponse represents the response for listing CAs
+type CAListResponse struct {
+	CAs   []model.CA `json:"cas"`
+	Total int        `json:"total" example:"5"`
+}
+
+// CAUpdateStatusRequest represents the request for updating CA status
+type CAUpdateStatusRequest struct {
+	Status string `json:"status" binding:"required" example:"revoked"`
+}
+
+// CARevokeRequest represents the request for revoking a CA
+type CARevokeRequest struct {
+	Reason string `json:"reason" binding:"required" example:"keyCompromise"`
+}
+
+// CAChainResponse represents the response for CA chain
+type CAChainResponse struct {
+	Chain []model.CA `json:"chain"`
+}
+
 type App struct {
 	keyService service.KeyManagementService
 	caService  ca_service.CaService
@@ -315,6 +336,189 @@ func (app *App) CreateCA(c *gin.Context) {
 	})
 }
 
+// @Summary Get all Certificate Authorities
+// @Description Retrieve all Certificate Authorities
+// @Tags Certificate Authority
+// @Accept json
+// @Produce json
+// @Success 200 {object} CAListResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /ca [get]
+func (app *App) GetAllCAs(c *gin.Context) {
+	ctx := context.Background()
+	
+	cas, err := app.caService.GetAllCAs(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	c.JSON(http.StatusOK, CAListResponse{
+		CAs:   cas,
+		Total: len(cas),
+	})
+}
+
+// @Summary Get a Certificate Authority by ID
+// @Description Retrieve a specific Certificate Authority by its ID
+// @Tags Certificate Authority
+// @Accept json
+// @Produce json
+// @Param id path int true "CA ID"
+// @Success 200 {object} model.CA
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /ca/{id} [get]
+func (app *App) GetCA(c *gin.Context) {
+	ctx := context.Background()
+	
+	caIDStr := c.Param("id")
+	caID := 0
+	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
+		return
+	}
+	
+	ca, err := app.caService.GetCA(ctx, caID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	c.JSON(http.StatusOK, ca)
+}
+
+// @Summary Get Certificate Authority chain
+// @Description Retrieve the certificate chain for a specific CA (from CA to root)
+// @Tags Certificate Authority
+// @Accept json
+// @Produce json
+// @Param id path int true "CA ID"
+// @Success 200 {object} CAChainResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /ca/{id}/chain [get]
+func (app *App) GetCAChain(c *gin.Context) {
+	ctx := context.Background()
+	
+	caIDStr := c.Param("id")
+	caID := 0
+	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
+		return
+	}
+	
+	chain, err := app.caService.GetCAChain(ctx, caID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	c.JSON(http.StatusOK, CAChainResponse{Chain: chain})
+}
+
+// @Summary Update Certificate Authority status
+// @Description Update the status of a Certificate Authority
+// @Tags Certificate Authority
+// @Accept json
+// @Produce json
+// @Param id path int true "CA ID"
+// @Param request body CAUpdateStatusRequest true "Status update request"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /ca/{id}/status [put]
+func (app *App) UpdateCAStatus(c *gin.Context) {
+	ctx := context.Background()
+	
+	caIDStr := c.Param("id")
+	caID := 0
+	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
+		return
+	}
+	
+	var req CAUpdateStatusRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	err := app.caService.UpdateCAStatus(ctx, caID, req.Status)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	c.JSON(http.StatusOK, map[string]string{"message": "CA status updated successfully"})
+}
+
+// @Summary Revoke a Certificate Authority
+// @Description Revoke a Certificate Authority with a specified reason
+// @Tags Certificate Authority
+// @Accept json
+// @Produce json
+// @Param id path int true "CA ID"
+// @Param request body CARevokeRequest true "CA revocation request"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /ca/{id}/revoke [post]
+func (app *App) RevokeCA(c *gin.Context) {
+	ctx := context.Background()
+	
+	caIDStr := c.Param("id")
+	caID := 0
+	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
+		return
+	}
+	
+	var req CARevokeRequest
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	err := app.caService.RevokeCA(ctx, caID, model.RevocationReason(req.Reason))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	c.JSON(http.StatusOK, map[string]string{"message": "CA revoked successfully"})
+}
+
+// @Summary Delete a Certificate Authority
+// @Description Soft delete a Certificate Authority (mark as deleted)
+// @Tags Certificate Authority
+// @Accept json
+// @Produce json
+// @Param id path int true "CA ID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /ca/{id} [delete]
+func (app *App) DeleteCA(c *gin.Context) {
+	ctx := context.Background()
+	
+	caIDStr := c.Param("id")
+	caID := 0
+	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
+		return
+	}
+	
+	err := app.caService.DeleteCA(ctx, caID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+	
+	c.JSON(http.StatusOK, map[string]string{"message": "CA deleted successfully"})
+}
+
 // @Summary Handle OCSP request
 // @Description Handle Online Certificate Status Protocol requests to check certificate status
 // @Tags Certificate Authority  
@@ -415,6 +619,12 @@ func main() {
 	r.GET("/ca/crl", app.GetCRL)
 	r.GET("/crl.pem", app.GetCRLFile)
 	r.POST("/ca/create", app.CreateCA)
+	r.GET("/ca", app.GetAllCAs)
+	r.GET("/ca/:id", app.GetCA)
+	r.GET("/ca/:id/chain", app.GetCAChain)
+	r.PUT("/ca/:id/status", app.UpdateCAStatus)
+	r.POST("/ca/:id/revoke", app.RevokeCA)
+	r.DELETE("/ca/:id", app.DeleteCA)
 	r.POST("/ocsp", app.HandleOCSP)
 
 	go func() {

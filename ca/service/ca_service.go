@@ -26,14 +26,16 @@ import (
 
 type CaService interface {
 	CreateCA(ctx context.Context, name string, caType model.CAType, parentCAID *int) (model.CA, error)
-	// GetCA(ctx context.Context, id int) (model.CA, error)
-	// GetCAChain(ctx context.Context, caID int) ([]model.CA, error)
-	// RevokeCA(ctx context.Context, caID int, reason model.RevocationReason) error
+	GetCA(ctx context.Context, id int) (model.CA, error)
+	GetAllCAs(ctx context.Context) ([]model.CA, error)
+	GetCAChain(ctx context.Context, caID int) ([]model.CA, error)
+	UpdateCAStatus(ctx context.Context, caID int, status string) error
+	RevokeCA(ctx context.Context, caID int, reason model.RevocationReason) error
+	DeleteCA(ctx context.Context, caID int) error
 
 	IssueCertificate(ctx context.Context, csrPEM string, issuerID int) (model.Certificate, error)
 	RevokeCertificate(ctx context.Context, serialNumber string, reason model.RevocationReason) error
 	GetCRL(ctx context.Context, caID int) ([]byte, error)
-	// GetCertificateStatus(ctx context.Context, serialNumber string) (model.CertificateStatus, error)
 	HandleOCSPRequest(ctx context.Context, requestData []byte, caID int) ([]byte, error)
 }
 
@@ -324,8 +326,8 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 			Organization: []string{"Viettel"},
 			CommonName:   name, // eg: "viettel-rootCA",
 		},
-		NotBefore:             notBefore,
-		KeyUsage:              x509.KeyUsageCRLSign | x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		NotBefore: notBefore,
+		// KeyUsage:              x509.KeyUsageCRLSign | x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		IsCA:                  true,
 		BasicConstraintsValid: true,
 		SubjectKeyId: func() []byte {
@@ -336,18 +338,21 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 			sum := sha1.Sum(pubKeyBytes)
 			return sum[:]
 		}(),
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+		// ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		CRLDistributionPoints: []string{"http://ca.example.com/crl.pem"},
 		OCSPServer:            []string{"http://ocsp.example.com"},
 	}
 	var signedCert []byte
 
+	var parentCAIDValue *int
 	//if caType is root CA, create self-signed certificate
 	// else create intermediate CA signed by parent CA
 	if caType == model.RootCAType {
+		parentCAIDValue = nil // root CA has no parent
 		//validity 8 years
 		notAfter := notBefore.Add(time.Duration(s.cfg.CA.ValidityDays) * 24 * time.Hour)
 		CAcertTemplate.NotAfter = notAfter
+		CAcertTemplate.KeyUsage = x509.KeyUsageCRLSign | x509.KeyUsageCertSign
 
 		signer, err := s.keyService.GetSigner(keyLabel)
 		if err != nil {
@@ -359,6 +364,7 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 			return model.CA{}, fmt.Errorf("failed to create self-signed certificate: %v", err)
 		}
 	} else { // Create intermediate CA signed by parent CA
+		parentCAIDValue = parentCAID
 		parentCA, err := s.repo.FindCAByID(ctx, *parentCAID)
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to get parent CA: %v", err)
@@ -384,6 +390,8 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 		CAcertTemplate.NotAfter = notBefore.Add(halfLifetime)
 
 		CAcertTemplate.MaxPathLen = 0
+		CAcertTemplate.KeyUsage = x509.KeyUsageCRLSign | x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+		CAcertTemplate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageOCSPSigning}
 
 		signedCert, err = x509.CreateCertificate(rand.Reader, &CAcertTemplate, parentCert, keyPair.PublicKey, signer)
 		if err != nil {
@@ -396,7 +404,7 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 	ca := model.CA{
 		Name:       name,
 		Type:       caType,
-		ParentCAID: parentCAID,
+		ParentCAID: parentCAIDValue,
 		CertPEM:    string(certPEM),
 		Status:     "active",
 		CreateAt:   notBefore,
@@ -516,9 +524,96 @@ func getOCSPReasonCode(reason model.RevocationReason) int {
 		model.ReasonCessationOfOperation: ocsp.CessationOfOperation,
 		model.ReasonCertificateHold:      ocsp.CertificateHold,
 	}
-	
+
 	if code, exists := reasonMap[reason]; exists {
 		return code
 	}
 	return ocsp.Unspecified
+}
+
+func (s *caService) GetCA(ctx context.Context, id int) (model.CA, error) {
+	return s.repo.FindCAByID(ctx, id)
+}
+
+func (s *caService) GetAllCAs(ctx context.Context) ([]model.CA, error) {
+	return s.repo.GetAllCAs(ctx)
+}
+
+func (s *caService) GetCAChain(ctx context.Context, caID int) ([]model.CA, error) {
+	return s.repo.GetCAChain(ctx, caID)
+}
+
+func (s *caService) UpdateCAStatus(ctx context.Context, caID int, status string) error {
+	// Validate status
+	validStatuses := []string{"active", "revoked", "expired", "unknown"}
+	isValid := false
+	for _, validStatus := range validStatuses {
+		if status == validStatus {
+			isValid = true
+			break
+		}
+	}
+
+	if !isValid {
+		return fmt.Errorf("invalid status: %s. Valid statuses are: active, revoked, expired, unknown", status)
+	}
+
+	return s.repo.UpdateCAStatus(ctx, caID, status)
+}
+
+func (s *caService) RevokeCA(ctx context.Context, caID int, reason model.RevocationReason) error {
+	// Get CA certificate
+	ca, err := s.repo.FindCAByID(ctx, caID)
+	if err != nil {
+		return fmt.Errorf("failed to find CA: %w", err)
+	}
+
+	// Parse CA certificate to get serial number
+	block, _ := pem.Decode([]byte(ca.CertPEM))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return fmt.Errorf("failed to decode CA certificate PEM block")
+	}
+	caCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse CA certificate: %v", err)
+	}
+
+	// Revoke the CA certificate
+	err = s.repo.Revoke(ctx, caCert.SerialNumber.String(), string(reason), true)
+	if err != nil {
+		return fmt.Errorf("failed to revoke CA certificate: %w", err)
+	}
+
+	// Update CA status to revoked
+	err = s.repo.UpdateCAStatus(ctx, caID, "revoked")
+	if err != nil {
+		return fmt.Errorf("failed to update CA status: %w", err)
+	}
+
+	return nil
+}
+
+func (s *caService) DeleteCA(ctx context.Context, caID int) error {
+	// Check if CA has any child CAs
+	childCAs, err := s.repo.GetChildCAs(ctx, caID)
+	if err != nil {
+		return fmt.Errorf("failed to check child CAs: %w", err)
+	}
+
+	if len(childCAs) > 0 {
+		return fmt.Errorf("cannot delete CA: it has %d child CA(s). Delete child CAs first", len(childCAs))
+	}
+
+	// Check if CA has issued any certificates
+	certificates, err := s.repo.GetCertificatesByCAID(ctx, caID)
+	if err != nil {
+		return fmt.Errorf("failed to check issued certificates: %w", err)
+	}
+
+	if len(certificates) > 0 {
+		return fmt.Errorf("cannot delete CA: it has issued %d certificate(s). Revoke all certificates first", len(certificates))
+	}
+
+	// Soft delete CA (update status to 'deleted')
+	return s.repo.UpdateCAStatus(ctx, caID, "deleted")
 }
