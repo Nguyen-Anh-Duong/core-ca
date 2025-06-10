@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"core-ca/keymanagement/repository"
@@ -187,7 +188,12 @@ func (app *App) IssueCertificate(c *gin.Context) {
 		c.JSON(400, ErrorResponse{Error: err.Error()})
 		return
 	}
-	certificate, err := app.caService.IssueCertificate(ctx, req.CSR, req.CAID)
+
+	// Process CSR to handle escaped newlines from JSON
+	processedCSR := strings.ReplaceAll(req.CSR, "\\n", "\n")
+
+	fmt.Println("Received CSR:", processedCSR)
+	certificate, err := app.caService.IssueCertificate(ctx, processedCSR, req.CAID)
 	if err != nil {
 		c.JSON(500, ErrorResponse{Error: err.Error()})
 		return
@@ -232,25 +238,25 @@ func (app *App) RevokeCertificate(c *gin.Context) {
 // @Router /crl.pem [get]
 func (app *App) GetCRLFile(c *gin.Context) {
 	ctx := context.Background()
-	
+
 	caIDStr := c.Query("ca_id")
 	if caIDStr == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "ca_id parameter is required"})
 		return
 	}
-	
+
 	caID := 0
 	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
 		return
 	}
-	
+
 	crlPEM, err := app.caService.GetCRL(ctx, caID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	// Set proper headers for CRL file
 	c.Header("Content-Type", "application/pkix-crl")
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"ca-%d-crl.pem\"", caID))
@@ -346,13 +352,13 @@ func (app *App) CreateCA(c *gin.Context) {
 // @Router /ca [get]
 func (app *App) GetAllCAs(c *gin.Context) {
 	ctx := context.Background()
-	
+
 	cas, err := app.caService.GetAllCAs(ctx)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, CAListResponse{
 		CAs:   cas,
 		Total: len(cas),
@@ -372,20 +378,20 @@ func (app *App) GetAllCAs(c *gin.Context) {
 // @Router /ca/{id} [get]
 func (app *App) GetCA(c *gin.Context) {
 	ctx := context.Background()
-	
+
 	caIDStr := c.Param("id")
 	caID := 0
 	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
 		return
 	}
-	
+
 	ca, err := app.caService.GetCA(ctx, caID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, ca)
 }
 
@@ -401,20 +407,20 @@ func (app *App) GetCA(c *gin.Context) {
 // @Router /ca/{id}/chain [get]
 func (app *App) GetCAChain(c *gin.Context) {
 	ctx := context.Background()
-	
+
 	caIDStr := c.Param("id")
 	caID := 0
 	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
 		return
 	}
-	
+
 	chain, err := app.caService.GetCAChain(ctx, caID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, CAChainResponse{Chain: chain})
 }
 
@@ -431,26 +437,26 @@ func (app *App) GetCAChain(c *gin.Context) {
 // @Router /ca/{id}/status [put]
 func (app *App) UpdateCAStatus(c *gin.Context) {
 	ctx := context.Background()
-	
+
 	caIDStr := c.Param("id")
 	caID := 0
 	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
 		return
 	}
-	
+
 	var req CAUpdateStatusRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	err := app.caService.UpdateCAStatus(ctx, caID, req.Status)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, map[string]string{"message": "CA status updated successfully"})
 }
 
@@ -467,26 +473,26 @@ func (app *App) UpdateCAStatus(c *gin.Context) {
 // @Router /ca/{id}/revoke [post]
 func (app *App) RevokeCA(c *gin.Context) {
 	ctx := context.Background()
-	
+
 	caIDStr := c.Param("id")
 	caID := 0
 	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
 		return
 	}
-	
+
 	var req CARevokeRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	err := app.caService.RevokeCA(ctx, caID, model.RevocationReason(req.Reason))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, map[string]string{"message": "CA revoked successfully"})
 }
 
@@ -502,26 +508,26 @@ func (app *App) RevokeCA(c *gin.Context) {
 // @Router /ca/{id} [delete]
 func (app *App) DeleteCA(c *gin.Context) {
 	ctx := context.Background()
-	
+
 	caIDStr := c.Param("id")
 	caID := 0
 	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
 		return
 	}
-	
+
 	err := app.caService.DeleteCA(ctx, caID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	c.JSON(http.StatusOK, map[string]string{"message": "CA deleted successfully"})
 }
 
 // @Summary Handle OCSP request
 // @Description Handle Online Certificate Status Protocol requests to check certificate status
-// @Tags Certificate Authority  
+// @Tags Certificate Authority
 // @Accept application/ocsp-request
 // @Produce application/ocsp-response
 // @Param ca_id query int true "Certificate Authority ID"
@@ -532,38 +538,38 @@ func (app *App) DeleteCA(c *gin.Context) {
 // @Router /ocsp [post]
 func (app *App) HandleOCSP(c *gin.Context) {
 	ctx := context.Background()
-	
+
 	caIDStr := c.Query("ca_id")
 	if caIDStr == "" {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "ca_id parameter is required"})
 		return
 	}
-	
+
 	caID := 0
 	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
 		return
 	}
-	
+
 	// Read OCSP request from body
 	requestData, err := c.GetRawData()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "failed to read request body"})
 		return
 	}
-	
+
 	if len(requestData) == 0 {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "empty OCSP request"})
 		return
 	}
-	
+
 	// Handle OCSP request
 	responseData, err := app.caService.HandleOCSPRequest(ctx, requestData, caID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
 	}
-	
+
 	// Set proper headers for OCSP response
 	c.Header("Content-Type", "application/ocsp-response")
 	c.Header("Cache-Control", "max-age=86400") // Cache for 24 hours

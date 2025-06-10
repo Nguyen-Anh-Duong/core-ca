@@ -339,8 +339,8 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 			return sum[:]
 		}(),
 		// ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-		CRLDistributionPoints: []string{"http://ca.example.com/crl.pem"},
-		OCSPServer:            []string{"http://ocsp.example.com"},
+		CRLDistributionPoints: []string{"http://localhost:8080/crl.pem"},
+		OCSPServer:            []string{"http://localhost:8080/ocsp"},
 	}
 	var signedCert []byte
 

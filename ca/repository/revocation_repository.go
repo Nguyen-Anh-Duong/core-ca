@@ -82,7 +82,11 @@ func (r *revocationRepository) IsRevoked(ctx context.Context, serialNumber strin
 	var reason sql.NullString
 	err := r.db.QueryRowContext(ctx, query, serialNumber).Scan(&cert.SerialNumber, &cert.RevocationDate, &reason, &cert.IsCA)
 	if err != nil {
-		return model.RevokedCertificate{}, false, errors.New("failed to check revocation status: " + err.Error())
+		if err == sql.ErrNoRows {
+			// No revoked certificate found
+			return model.RevokedCertificate{}, false, nil
+		}
+		return model.RevokedCertificate{}, false, errors.New("failed to check if certificate is revoked: " + err.Error())
 	}
 	if reason.Valid {
 		cert.Reason = model.RevocationReason(reason.String)
