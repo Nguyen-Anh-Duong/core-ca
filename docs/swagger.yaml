@@ -2,10 +2,17 @@ basePath: /
 definitions:
   main.CertificateIssueRequest:
     properties:
+      ca_id:
+        example: 1
+        type: integer
       csr:
-        example: '-----BEGIN CERTIFICATE REQUEST-----...'
+        example: |-
+          -----BEGIN CERTIFICATE REQUEST-----
+          MIICgjCCAWoCAQAwPTELMAkGA1UEBhMCVk4xFDASBgNVBAoMC0V4YW1wbGUgT3JnMRgwFgYDVQQDDA93d3cuZXhhbXBsZS5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC7ol+rgjOKsTGMvsQRssTJxEWbgK4TarhCt6OCg/WTYiY8+XOOOSvLzBaBCrKWudZSkiivlmoj+iwnhcX/ufJdErWGR1ANcF2x5o5kZ58I9IVdduJaHsN+dkJdNukpFzgvI4Hk6Tha88Hs5DyIcPVfU19zDX2oDpg3hvWb1F0EQOCE0+iV4eu4yUpNuEfemoRHFrE6Lo/4AAqTlhutyM0dvSOVaqcsgWY/9ioqdP1OWsxHHADKek5j70xd+uujAMgiozrapucPNK5YqC09BoQdAb84gGrvwM6jg9ytyYHK02/I0cpN08Q1+oSJVIKzOTSbJPvgSXdnElQ9aqsIX5GlAgMBAAGgADANBgkqhkiG9w0BAQsFAAOCAQEAIxXs09E/K2nhJMXoYoRmU4Fi67FWUYEAgI+KVQAJ/rrziUj4kqZ8T1Krq2FulapCPwBwMtpUCm4xAslGemvSfNOsbnDUmCp2RRZkeDbkYAgi2J3WLpPegWw4gnus/SWLrdaNudjoRJJIo1hcRot2Ia7VmACrMz9S9G/OjOUvF/6hKUsIiNIuM9muxUBkb2UX8YGxJQK8iEp1v0MRE/38TS5FFmgIOyWw4If/fqQak/fmiGM3rolvqU8btb0hfkM0bGPmNSUO5C1rphqIeA/5rUrdI6tryo+aqPg4lDORI2xV9C/egptl4hRPdMSGHVJrTSlfy4jkJ1LYkQyC+zYz8g==
+          -----END CERTIFICATE REQUEST-----
         type: string
     required:
+    - ca_id
     - csr
     type: object
   main.CertificateRevokeRequest:
@@ -92,6 +99,42 @@ definitions:
           ...
         type: string
     type: object
+  model.Certificate:
+    properties:
+      ca_id:
+        description: Gắn với CA nào
+        type: integer
+      cert_pem:
+        description: PEM-encoded cert
+        type: string
+      not_after:
+        type: string
+      not_before:
+        type: string
+      serial_number:
+        type: string
+      status:
+        allOf:
+        - $ref: '#/definitions/model.CertificateStatus'
+        description: active, expired, revoked
+      subject:
+        description: |-
+          CAKeyID      int    `json:"ca_key_id"` // Gắn với key nào
+          Usage        []KeyUsage        `json:"usage"`     // certSign, crlSign, ocspSign...
+        type: string
+    type: object
+  model.CertificateStatus:
+    enum:
+    - valid
+    - revoked
+    - expired
+    - unknown
+    type: string
+    x-enum-varnames:
+    - StatusValid
+    - StatusRevoked
+    - StatusExpired
+    - StatusUnknown
 host: localhost:8080
 info:
   contact:
@@ -142,6 +185,12 @@ paths:
       consumes:
       - application/json
       description: Retrieve the current Certificate Revocation List
+      parameters:
+      - description: Certificate Authority ID
+        in: query
+        name: ca_id
+        required: true
+        type: integer
       produces:
       - application/x-pem-file
       responses:
@@ -149,6 +198,10 @@ paths:
           description: PEM encoded CRL
           schema:
             type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -169,12 +222,12 @@ paths:
         schema:
           $ref: '#/definitions/main.CertificateIssueRequest'
       produces:
-      - application/x-pem-file
+      - application/json
       responses:
         "200":
-          description: PEM encoded certificate
+          description: Certificate details with PEM data
           schema:
-            type: string
+            $ref: '#/definitions/model.Certificate'
         "400":
           description: Bad Request
           schema:

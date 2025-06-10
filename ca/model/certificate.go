@@ -19,7 +19,6 @@ import "time"
 //		CertPEM      string // PEM-encoded certificate
 //	}
 type Certificate struct {
-	ID           int    `json:"id"`
 	SerialNumber string `json:"serial_number"`
 	CAID         int    `json:"ca_id"` // Gắn với CA nào
 	// CAKeyID      int    `json:"ca_key_id"` // Gắn với key nào

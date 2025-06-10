@@ -6,6 +6,7 @@ import (
 	ca_repository "core-ca/ca/repository"
 	ca_service "core-ca/ca/service"
 	"core-ca/config"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -59,7 +60,8 @@ type KeyGetResponse struct {
 
 // CertificateIssueRequest represents the request for issuing a certificate
 type CertificateIssueRequest struct {
-	CSR string `json:"csr" binding:"required" example:"-----BEGIN CERTIFICATE REQUEST-----..."`
+	CSR  string `json:"csr" binding:"required" example:"-----BEGIN CERTIFICATE REQUEST-----\nMIICgjCCAWoCAQAwPTELMAkGA1UEBhMCVk4xFDASBgNVBAoMC0V4YW1wbGUgT3JnMRgwFgYDVQQDDA93d3cuZXhhbXBsZS5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC7ol+rgjOKsTGMvsQRssTJxEWbgK4TarhCt6OCg/WTYiY8+XOOOSvLzBaBCrKWudZSkiivlmoj+iwnhcX/ufJdErWGR1ANcF2x5o5kZ58I9IVdduJaHsN+dkJdNukpFzgvI4Hk6Tha88Hs5DyIcPVfU19zDX2oDpg3hvWb1F0EQOCE0+iV4eu4yUpNuEfemoRHFrE6Lo/4AAqTlhutyM0dvSOVaqcsgWY/9ioqdP1OWsxHHADKek5j70xd+uujAMgiozrapucPNK5YqC09BoQdAb84gGrvwM6jg9ytyYHK02/I0cpN08Q1+oSJVIKzOTSbJPvgSXdnElQ9aqsIX5GlAgMBAAGgADANBgkqhkiG9w0BAQsFAAOCAQEAIxXs09E/K2nhJMXoYoRmU4Fi67FWUYEAgI+KVQAJ/rrziUj4kqZ8T1Krq2FulapCPwBwMtpUCm4xAslGemvSfNOsbnDUmCp2RRZkeDbkYAgi2J3WLpPegWw4gnus/SWLrdaNudjoRJJIo1hcRot2Ia7VmACrMz9S9G/OjOUvF/6hKUsIiNIuM9muxUBkb2UX8YGxJQK8iEp1v0MRE/38TS5FFmgIOyWw4If/fqQak/fmiGM3rolvqU8btb0hfkM0bGPmNSUO5C1rphqIeA/5rUrdI6tryo+aqPg4lDORI2xV9C/egptl4hRPdMSGHVJrTSlfy4jkJ1LYkQyC+zYz8g==\n-----END CERTIFICATE REQUEST-----"`
+	CAID int    `json:"ca_id" binding:"required" example:"1"`
 }
 
 // CertificateRevokeRequest represents the request for revoking a certificate
@@ -151,24 +153,25 @@ func (app *App) GetKeyPair(c *gin.Context) {
 // @Description Issue a new certificate from a Certificate Signing Request (CSR)
 // @Tags Certificate Authority
 // @Accept json
-// @Produce application/x-pem-file
+// @Produce json
 // @Param request body CertificateIssueRequest true "Certificate issuance request"
-// @Success 200 {string} string "PEM encoded certificate"
+// @Success 200 {object} model.Certificate "Certificate details with PEM data"
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /ca/issue [post]
 func (app *App) IssueCertificate(c *gin.Context) {
+	ctx := context.Background()
 	var req CertificateIssueRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(400, ErrorResponse{Error: err.Error()})
 		return
 	}
-	certPEM, err := app.caService.IssueCertificate(req.CSR)
+	certificate, err := app.caService.IssueCertificate(ctx, req.CSR, req.CAID)
 	if err != nil {
 		c.JSON(500, ErrorResponse{Error: err.Error()})
 		return
 	}
-	c.Data(http.StatusOK, "application/x-pem-file", certPEM)
+	c.JSON(http.StatusOK, certificate)
 }
 
 // @Summary Revoke a certificate
@@ -182,12 +185,13 @@ func (app *App) IssueCertificate(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Router /ca/revoke [post]
 func (app *App) RevokeCertificate(c *gin.Context) {
+	ctx := context.Background()
 	var req CertificateRevokeRequest
 	if err := c.BindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	err := app.caService.RevokeCertificate(req.SerialNumber, model.RevocationReason(req.Reason))
+	err := app.caService.RevokeCertificate(ctx, req.SerialNumber, model.RevocationReason(req.Reason))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -200,11 +204,27 @@ func (app *App) RevokeCertificate(c *gin.Context) {
 // @Tags Certificate Authority
 // @Accept json
 // @Produce application/x-pem-file
+// @Param ca_id query int true "Certificate Authority ID"
 // @Success 200 {string} string "PEM encoded CRL"
+// @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /ca/crl [get]
 func (app *App) GetCRL(c *gin.Context) {
-	crlPEM, err := app.caService.GetCRL()
+	ctx := context.Background()
+
+	caIDStr := c.Query("ca_id")
+	if caIDStr == "" {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "ca_id parameter is required"})
+		return
+	}
+
+	caID := 0
+	if _, err := fmt.Sscanf(caIDStr, "%d", &caID); err != nil {
+		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "invalid ca_id parameter"})
+		return
+	}
+
+	crlPEM, err := app.caService.GetCRL(ctx, caID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 		return
@@ -230,7 +250,7 @@ func (app *App) CreateCA(c *gin.Context) {
 	}
 
 	ctx := context.Background()
-	
+
 	// Convert string type to model.CAType
 	var caType model.CAType
 	switch req.Type {
@@ -242,7 +262,7 @@ func (app *App) CreateCA(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, ErrorResponse{Error: "Invalid CA type. Must be 'root' or 'sub'"})
 		return
 	}
-	
+
 	// Create a new CA
 	ca, err := app.caService.CreateCA(ctx, req.Name, caType, req.ParentCAID)
 	if err != nil {

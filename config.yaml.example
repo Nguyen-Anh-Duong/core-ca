@@ -6,6 +6,19 @@ keymanagement:
     
 ca:
   issuer: "CN=Your CA Name,O=Your Organization,C=VN"
-  validity_days: 365
+  validity_days: 2920
   database:
-    dsn: "postgres://username:password@localhost:5432/database_name?sslmode=disable" 
+    dsn: "postgres://username:password@localhost:5432/core_ca?sslmode=disable"
+
+# Example with real values:
+# keymanagement:
+#   softhsm:
+#     module: /usr/lib/softhsm/libsofthsm2.so
+#     slot: "0"
+#     pin: "1234"
+# 
+# ca:
+#   issuer: "CN=Viettel Root CA,O=Viettel Group,C=VN"
+#   validity_days: 2920
+#   database:
+#     dsn: "postgres://core_ca_user:secure_password@localhost:5432/core_ca?sslmode=disable" 

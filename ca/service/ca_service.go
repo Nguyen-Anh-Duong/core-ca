@@ -28,10 +28,10 @@ type CaService interface {
 	// GetCAChain(ctx context.Context, caID int) ([]model.CA, error)
 	// RevokeCA(ctx context.Context, caID int, reason model.RevocationReason) error
 
-	IssueCertificate(csrPEM string) ([]byte, error)
-	RevokeCertificate(serialNumber string, reason model.RevocationReason) error
-	GetCRL() ([]byte, error)
-	// GetCertificateStatus(serialNumber string) (model.CertificateStatus, error)
+	IssueCertificate(ctx context.Context, csrPEM string, issuerID int) (model.Certificate, error)
+	RevokeCertificate(ctx context.Context, serialNumber string, reason model.RevocationReason) error
+	GetCRL(ctx context.Context, caID int) ([]byte, error)
+	// GetCertificateStatus(ctx context.Context, serialNumber string) (model.CertificateStatus, error)
 }
 
 type caService struct {
@@ -48,108 +48,116 @@ func NewCaService(repo repository.Repository, keyService service.KeyManagementSe
 	}
 }
 
-func (s *caService) IssueCertificate(csrPEM string) ([]byte, error) {
-	ctx := context.Background()
+func (s *caService) IssueCertificate(ctx context.Context, csrPEM string, caID int) (model.Certificate, error) {
 
 	// Parse CSR
 	csrBlock, _ := pem.Decode([]byte(csrPEM))
 
 	if csrBlock == nil || csrBlock.Type != "CERTIFICATE REQUEST" {
-		return nil, errors.New("invalid CSR")
+		return model.Certificate{}, errors.New("invalid CSR")
 	}
 	csr, err := x509.ParseCertificateRequest(csrBlock.Bytes)
 	if err != nil {
-		return nil, err
+		return model.Certificate{}, err
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return nil, errors.New("invalid CSR signature")
+		return model.Certificate{}, errors.New("invalid CSR signature")
+	}
+
+	ca, err := s.repo.FindCAByID(ctx, caID)
+	if err != nil {
+		return model.Certificate{}, fmt.Errorf("failed to find issuer CA: %w", err)
 	}
 
 	// Get signer.
-	signer, err := s.keyService.GetSigner("test1")
+	signer, err := s.keyService.GetSigner(ca.Name + "-Key")
 	if err != nil {
-		return nil, err
+		return model.Certificate{}, err
 	}
 
 	// Generate serial number
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return nil, err
+		return model.Certificate{}, err
 	}
+
+	block, _ := pem.Decode([]byte(ca.CertPEM))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return model.Certificate{}, fmt.Errorf("failed to decode PEM block containing certificate")
+	}
+	caCert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return model.Certificate{}, fmt.Errorf("failed to get issuer CA key: %v", err)
+	}
+
+	// set validity to half of issuer CA's lifetime
+	certLifetime := caCert.NotAfter.Sub(caCert.NotBefore)
+	halfLifetime := certLifetime / 2
 
 	// Create certificate template for the subject (end entity).
 	notBefore := time.Now()
-	notAfter := notBefore.Add(time.Duration(s.cfg.CA.ValidityDays) * 24 * time.Hour)
+	notAfter := notBefore.Add(halfLifetime)
+
 	subjectTemplate := &x509.Certificate{
-		SerialNumber: serialNumber,
-		Subject:      csr.Subject,
-		Issuer: pkix.Name{
-			CommonName: s.cfg.CA.Issuer,
-			// Organization: []string{"Example Org"},
-			// Country:      []string{"VN"},
-		},
+		Version:               csr.Version,
+		SerialNumber:          serialNumber,
+		Subject:               csr.Subject,
 		NotBefore:             notBefore,
 		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  false,
-		SubjectKeyId:          []byte{1, 2, 3, 4}, // Simplified.
+		SubjectKeyId: func() []byte {
+			pubKeyBytes, err := x509.MarshalPKIXPublicKey(csr.PublicKey)
+			if err != nil {
+				log.Fatal(err)
+			}
+			sum := sha1.Sum(pubKeyBytes)
+			return sum[:]
+		}(),
 		SignatureAlgorithm:    x509.SHA256WithRSA,
-	}
-
-	// Create issuer (CA) template with CA's public key.
-	issuerTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		// Subject: pkix.Name{
-		// 	CommonName:   s.cfg.CA.Issuer,
-		// 	Organization: []string{"Example Org"},
-		// 	Country:      []string{"VN"},
-		// },
-		Issuer: pkix.Name{
-			CommonName:   s.cfg.CA.Issuer,
-			Organization: []string{"Example Org"},
-			Country:      []string{"VN"},
-		},
-		NotBefore:             notBefore.Add(-24 * time.Hour),
-		NotAfter:              notAfter.Add(365 * 24 * time.Hour), // CA valid longer.
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-		SignatureAlgorithm:    x509.SHA256WithRSA,
-		CRLDistributionPoints: []string{
-			"https://my-ca.example.com/ca/crl",
-		},
+		PublicKey:             csr.PublicKey,
+		PublicKeyAlgorithm:    csr.PublicKeyAlgorithm,
+		ExtraExtensions:       csr.Extensions,
+		AuthorityKeyId:        caCert.SubjectKeyId,
+		CRLDistributionPoints: caCert.CRLDistributionPoints,
+		OCSPServer:            caCert.OCSPServer,
+		DNSNames:              csr.DNSNames,
+		EmailAddresses:        csr.EmailAddresses,
+		IPAddresses:           csr.IPAddresses,
 	}
 
 	// Create certificate.
-	certDER, err := x509.CreateCertificate(rand.Reader, subjectTemplate, issuerTemplate, csr.PublicKey, signer)
+	cert, err := x509.CreateCertificate(rand.Reader, subjectTemplate, caCert, csr.PublicKey, signer)
 	if err != nil {
-		return nil, fmt.Errorf("x509.CreateCertificate failed: %v", err)
+		return model.Certificate{}, fmt.Errorf("x509.CreateCertificate failed: %v", err)
 	}
 
 	certPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
-		Bytes: certDER,
+		Bytes: cert,
 	})
 
 	// Save certificate metadata.
 	certData := model.Certificate{
 		SerialNumber: serialNumber.String(),
+		CAID:         ca.ID,
 		Subject:      csr.Subject.CommonName,
 		NotBefore:    notBefore,
 		NotAfter:     notAfter,
 		CertPEM:      string(certPEM),
-	}
-	if err := s.repo.SaveCert(ctx, certData); err != nil {
-		return nil, err
+		Status:       model.StatusValid,
 	}
 
-	return certPEM, nil
+	if err := s.repo.SaveCert(ctx, certData); err != nil {
+		return model.Certificate{}, err
+	}
+
+	return certData, nil
 }
 
-func (s *caService) RevokeCertificate(serialNumber string, reason model.RevocationReason) error {
-	ctx := context.Background()
+func (s *caService) RevokeCertificate(ctx context.Context, serialNumber string, reason model.RevocationReason) error {
 	// Validate certificate exists.
 	_, err := s.repo.FindBySerialNumber(ctx, serialNumber)
 	if err != nil {
@@ -159,22 +167,30 @@ func (s *caService) RevokeCertificate(serialNumber string, reason model.Revocati
 	return s.repo.Revoke(ctx, serialNumber, string(reason), false)
 }
 
-func (s *caService) GetCRL() ([]byte, error) {
-	ctx := context.Background()
+func (s *caService) GetCRL(ctx context.Context, caID int) ([]byte, error) {
 
-	revokedCerts, err := s.repo.GetRevokedCertificates(ctx)
+	ca, err := s.repo.FindCAByID(ctx, caID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to find CA: %w", err)
 	}
 
-	//Get key pair
-	keypair, err := s.keyService.GetKeyPair("test1")
+	// Parse CA certificate
+	block, _ := pem.Decode([]byte(ca.CertPEM))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("failed to decode CA certificate PEM block")
+	}
+	caCert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse CA certificate: %v", err)
 	}
 
 	// Get signer.
-	signer, err := s.keyService.GetSigner("test1")
+	signer, err := s.keyService.GetSigner(ca.Name + "-Key")
+	if err != nil {
+		return nil, err
+	}
+
+	revokedCerts, err := s.repo.GetRevokedCertificates(ctx, caID)
 	if err != nil {
 		return nil, err
 	}
@@ -213,13 +229,9 @@ func (s *caService) GetCRL() ([]byte, error) {
 		})
 	}
 
-	// Create CRL.
+	// Create CRL using the CA certificate as issuer
 	crlTemplate := x509.RevocationList{
-		Issuer: pkix.Name{
-			CommonName:   s.cfg.CA.Issuer,
-			Organization: []string{"Example Org"},
-			Country:      []string{"VN"},
-		},
+		Issuer:                    caCert.Subject,
 		SignatureAlgorithm:        x509.SHA256WithRSA,
 		RevokedCertificateEntries: revokedList,
 		ThisUpdate:                time.Now(),
@@ -227,44 +239,7 @@ func (s *caService) GetCRL() ([]byte, error) {
 		Number:                    big.NewInt(1),
 	}
 
-	notBefore := time.Now()
-	notAfter := notBefore.Add(time.Duration(s.cfg.CA.ValidityDays) * 24 * time.Hour)
-
-	pubKeyBytes, err := x509.MarshalPKIXPublicKey(keypair.PublicKey)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	issuerTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			CommonName: s.cfg.CA.Issuer,
-			// Organization: []string{"Example Org"},
-			// Country:      []string{"VN"},
-		},
-		Issuer: pkix.Name{
-			CommonName: s.cfg.CA.Issuer + "haha",
-			// Organization: []string{"Example Org"},
-			// Country:      []string{"VN"},
-		},
-		NotBefore:             notBefore.Add(-24 * time.Hour),
-		NotAfter:              notAfter.Add(365 * 24 * time.Hour), // CA valid longer.
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-		SignatureAlgorithm:    x509.SHA256WithRSA,
-		PublicKey:             keypair.PublicKey,
-		PublicKeyAlgorithm:    x509.RSA,
-		CRLDistributionPoints: []string{
-			"https://my-ca.example.com/ca/crl",
-		},
-		SubjectKeyId: func() []byte {
-			sum := sha1.Sum(pubKeyBytes)
-			return sum[:]
-		}(),
-	}
-
-	crlDER, err := x509.CreateRevocationList(rand.Reader, &crlTemplate, issuerTemplate, signer)
+	crlDER, err := x509.CreateRevocationList(rand.Reader, &crlTemplate, caCert, signer)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +254,6 @@ func (s *caService) GetCRL() ([]byte, error) {
 	}
 
 	return pemBuf.Bytes(), nil
-
 }
 
 // tao mot ca moi can tao moi token va key
@@ -325,7 +299,7 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 
 	// keyID, err := s.repo.SaveKey(ctx, key)
 	// if err != nil {
-	// 	return model.CA{}, nil
+	//     return model.CA{}, nil
 	// }
 
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
@@ -334,7 +308,6 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 	}
 
 	notBefore := time.Now()
-	notAfter := notBefore.Add(time.Duration(s.cfg.CA.ValidityDays) * 24 * time.Hour)
 
 	//certificate template for new CA
 	CAcertTemplate := x509.Certificate{
@@ -349,7 +322,6 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 			CommonName:   name, // eg: "viettel-rootCA",
 		},
 		NotBefore:             notBefore,
-		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageCRLSign | x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
 		IsCA:                  true,
 		BasicConstraintsValid: true,
@@ -370,6 +342,10 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 	//if caType is root CA, create self-signed certificate
 	// else create intermediate CA signed by parent CA
 	if caType == model.RootCAType {
+		//validity 8 years
+		notAfter := notBefore.Add(time.Duration(s.cfg.CA.ValidityDays) * 24 * time.Hour)
+		CAcertTemplate.NotAfter = notAfter
+
 		signer, err := s.keyService.GetSigner(keyLabel)
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to get signer for CA key: %v", err)
@@ -380,7 +356,6 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 			return model.CA{}, fmt.Errorf("failed to create self-signed certificate: %v", err)
 		}
 	} else { // Create intermediate CA signed by parent CA
-		CAcertTemplate.MaxPathLen = 0
 		parentCA, err := s.repo.FindCAByID(ctx, *parentCAID)
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to get parent CA: %v", err)
@@ -396,10 +371,16 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 			return model.CA{}, fmt.Errorf("failed to decode PEM block containing certificate")
 		}
 		parentCert, err := x509.ParseCertificate(block.Bytes)
-
 		if err != nil {
 			return model.CA{}, fmt.Errorf("failed to get parent CA key: %v", err)
 		}
+
+		// set validity to half of parent CA's lifetime
+		caLifetime := parentCert.NotAfter.Sub(parentCert.NotBefore)
+		halfLifetime := caLifetime / 2
+		CAcertTemplate.NotAfter = notBefore.Add(halfLifetime)
+
+		CAcertTemplate.MaxPathLen = 0
 
 		signedCert, err = x509.CreateCertificate(rand.Reader, &CAcertTemplate, parentCert, keyPair.PublicKey, signer)
 		if err != nil {

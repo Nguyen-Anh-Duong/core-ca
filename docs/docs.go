@@ -83,11 +83,26 @@ const docTemplate = `{
                     "Certificate Authority"
                 ],
                 "summary": "Get Certificate Revocation List (CRL)",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Certificate Authority ID",
+                        "name": "ca_id",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "PEM encoded CRL",
                         "schema": {
                             "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
                         }
                     },
                     "500": {
@@ -106,7 +121,7 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "produces": [
-                    "application/x-pem-file"
+                    "application/json"
                 ],
                 "tags": [
                     "Certificate Authority"
@@ -125,9 +140,9 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "PEM encoded certificate",
+                        "description": "Certificate details with PEM data",
                         "schema": {
-                            "type": "string"
+                            "$ref": "#/definitions/model.Certificate"
                         }
                     },
                     "400": {
@@ -280,12 +295,17 @@ const docTemplate = `{
         "main.CertificateIssueRequest": {
             "type": "object",
             "required": [
+                "ca_id",
                 "csr"
             ],
             "properties": {
+                "ca_id": {
+                    "type": "integer",
+                    "example": 1
+                },
                 "csr": {
                     "type": "string",
-                    "example": "-----BEGIN CERTIFICATE REQUEST-----..."
+                    "example": "-----BEGIN CERTIFICATE REQUEST-----\nMIICgjCCAWoCAQAwPTELMAkGA1UEBhMCVk4xFDASBgNVBAoMC0V4YW1wbGUgT3JnMRgwFgYDVQQDDA93d3cuZXhhbXBsZS5jb20wggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQC7ol+rgjOKsTGMvsQRssTJxEWbgK4TarhCt6OCg/WTYiY8+XOOOSvLzBaBCrKWudZSkiivlmoj+iwnhcX/ufJdErWGR1ANcF2x5o5kZ58I9IVdduJaHsN+dkJdNukpFzgvI4Hk6Tha88Hs5DyIcPVfU19zDX2oDpg3hvWb1F0EQOCE0+iV4eu4yUpNuEfemoRHFrE6Lo/4AAqTlhutyM0dvSOVaqcsgWY/9ioqdP1OWsxHHADKek5j70xd+uujAMgiozrapucPNK5YqC09BoQdAb84gGrvwM6jg9ytyYHK02/I0cpN08Q1+oSJVIKzOTSbJPvgSXdnElQ9aqsIX5GlAgMBAAGgADANBgkqhkiG9w0BAQsFAAOCAQEAIxXs09E/K2nhJMXoYoRmU4Fi67FWUYEAgI+KVQAJ/rrziUj4kqZ8T1Krq2FulapCPwBwMtpUCm4xAslGemvSfNOsbnDUmCp2RRZkeDbkYAgi2J3WLpPegWw4gnus/SWLrdaNudjoRJJIo1hcRot2Ia7VmACrMz9S9G/OjOUvF/6hKUsIiNIuM9muxUBkb2UX8YGxJQK8iEp1v0MRE/38TS5FFmgIOyWw4If/fqQak/fmiGM3rolvqU8btb0hfkM0bGPmNSUO5C1rphqIeA/5rUrdI6tryo+aqPg4lDORI2xV9C/egptl4hRPdMSGHVJrTSlfy4jkJ1LYkQyC+zYz8g==\n-----END CERTIFICATE REQUEST-----"
                 }
             }
         },
@@ -403,6 +423,55 @@ const docTemplate = `{
                     "example": "-----BEGIN RSA PUBLIC KEY-----\n..."
                 }
             }
+        },
+        "model.Certificate": {
+            "type": "object",
+            "properties": {
+                "ca_id": {
+                    "description": "Gắn với CA nào",
+                    "type": "integer"
+                },
+                "cert_pem": {
+                    "description": "PEM-encoded cert",
+                    "type": "string"
+                },
+                "not_after": {
+                    "type": "string"
+                },
+                "not_before": {
+                    "type": "string"
+                },
+                "serial_number": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "active, expired, revoked",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/model.CertificateStatus"
+                        }
+                    ]
+                },
+                "subject": {
+                    "description": "CAKeyID      int    ` + "`" + `json:\"ca_key_id\"` + "`" + ` // Gắn với key nào\nUsage        []KeyUsage        ` + "`" + `json:\"usage\"` + "`" + `     // certSign, crlSign, ocspSign...",
+                    "type": "string"
+                }
+            }
+        },
+        "model.CertificateStatus": {
+            "type": "string",
+            "enum": [
+                "valid",
+                "revoked",
+                "expired",
+                "unknown"
+            ],
+            "x-enum-varnames": [
+                "StatusValid",
+                "StatusRevoked",
+                "StatusExpired",
+                "StatusUnknown"
+            ]
         }
     }
 }`
