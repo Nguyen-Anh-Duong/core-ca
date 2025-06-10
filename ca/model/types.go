@@ -31,7 +31,7 @@ const (
 type CAStatus string
 
 const (
-	ActiveCAStatuc  CAStatus = "active"
+	ActiveCAStatus  CAStatus = "active"
 	RevokedCaStatus CAStatus = "revoked"
 	ExpiredCaStatus CAStatus = "expired"
 	UnknownCaStatus CAStatus = "unknown"

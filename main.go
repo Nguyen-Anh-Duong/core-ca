@@ -630,7 +630,7 @@ func main() {
 	r.GET("/ca/:id/chain", app.GetCAChain)
 	r.PUT("/ca/:id/status", app.UpdateCAStatus)
 	r.POST("/ca/:id/revoke", app.RevokeCA)
-	r.DELETE("/ca/:id", app.DeleteCA)
+	// r.DELETE("/ca/:id", app.DeleteCA)
 	r.POST("/ocsp", app.HandleOCSP)
 
 	go func() {

@@ -615,5 +615,5 @@ func (s *caService) DeleteCA(ctx context.Context, caID int) error {
 	}
 
 	// Soft delete CA (update status to 'deleted')
-	return s.repo.UpdateCAStatus(ctx, caID, "deleted")
+	return s.repo.UpdateCAStatus(ctx, caID, string(model.RevokedCaStatus))
 }
