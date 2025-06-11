@@ -11,6 +11,7 @@ type CertificateRepository interface {
 	SaveCert(ctx context.Context, certData model.Certificate) error
 	FindBySerialNumber(ctx context.Context, serialNumber string) (model.Certificate, error)
 	FindCertByCAID(ctx context.Context, id int) (model.Certificate, error)
+	GetAllCertificates(ctx context.Context) ([]model.Certificate, error)
 }
 
 type certificateRepository struct {
@@ -59,4 +60,34 @@ func (r *certificateRepository) FindCertByCAID(ctx context.Context, caID int) (m
 		return model.Certificate{}, fmt.Errorf("FindCertByCAID: %w", err) // Other error
 	}
 	return certData, nil
+}
+
+func (r *certificateRepository) GetAllCertificates(ctx context.Context) ([]model.Certificate, error) {
+	query := `
+		SELECT serial_number, subject, not_before, not_after, cert_pem, ca_id, status
+		FROM certificates
+		ORDER BY not_before DESC
+	`
+	rows, err := r.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("GetAllCertificates: failed to query certificates: %w", err)
+	}
+	defer rows.Close()
+
+	var certificates []model.Certificate
+	for rows.Next() {
+		var cert model.Certificate
+		err := rows.Scan(&cert.SerialNumber, &cert.Subject, &cert.NotBefore, &cert.NotAfter, 
+			&cert.CertPEM, &cert.CAID, &cert.Status)
+		if err != nil {
+			return nil, fmt.Errorf("GetAllCertificates: failed to scan certificate: %w", err)
+		}
+		certificates = append(certificates, cert)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("GetAllCertificates: rows error: %w", err)
+	}
+
+	return certificates, nil
 }

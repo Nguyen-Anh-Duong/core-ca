@@ -486,6 +486,35 @@ const docTemplate = `{
                 }
             }
         },
+        "/certificates": {
+            "get": {
+                "description": "Retrieve all certificates from the database",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Certificate Authority"
+                ],
+                "summary": "Get all certificates",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/main.CertificateListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/main.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/crl.pem": {
             "get": {
                 "description": "Retrieve the current Certificate Revocation List in standard CRL format",
@@ -736,6 +765,21 @@ const docTemplate = `{
                 }
             }
         },
+        "main.CertificateListResponse": {
+            "type": "object",
+            "properties": {
+                "certificates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Certificate"
+                    }
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 10
+                }
+            }
+        },
         "main.CertificateRevokeRequest": {
             "type": "object",
             "required": [
@@ -899,7 +943,7 @@ const docTemplate = `{
                 "unknown"
             ],
             "x-enum-varnames": [
-                "ActiveCAStatuc",
+                "ActiveCAStatus",
                 "RevokedCaStatus",
                 "ExpiredCaStatus",
                 "UnknownCaStatus"

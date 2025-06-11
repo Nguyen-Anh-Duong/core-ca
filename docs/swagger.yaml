@@ -48,6 +48,16 @@ definitions:
     - ca_id
     - csr
     type: object
+  main.CertificateListResponse:
+    properties:
+      certificates:
+        items:
+          $ref: '#/definitions/model.Certificate'
+        type: array
+      total:
+        example: 10
+        type: integer
+    type: object
   main.CertificateRevokeRequest:
     properties:
       reason:
@@ -166,7 +176,7 @@ definitions:
     - unknown
     type: string
     x-enum-varnames:
-    - ActiveCAStatuc
+    - ActiveCAStatus
     - RevokedCaStatus
     - ExpiredCaStatus
     - UnknownCaStatus
@@ -531,6 +541,25 @@ paths:
           schema:
             $ref: '#/definitions/main.ErrorResponse'
       summary: Revoke a certificate
+      tags:
+      - Certificate Authority
+  /certificates:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve all certificates from the database
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/main.CertificateListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/main.ErrorResponse'
+      summary: Get all certificates
       tags:
       - Certificate Authority
   /crl.pem:

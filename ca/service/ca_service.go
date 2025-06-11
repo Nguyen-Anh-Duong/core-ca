@@ -37,6 +37,7 @@ type CaService interface {
 	RevokeCertificate(ctx context.Context, serialNumber string, reason model.RevocationReason) error
 	GetCRL(ctx context.Context, caID int) ([]byte, error)
 	HandleOCSPRequest(ctx context.Context, requestData []byte, caID int) ([]byte, error)
+	GetAllCertificates(ctx context.Context) ([]model.Certificate, error)
 }
 
 type caService struct {
@@ -427,6 +428,7 @@ func (s *caService) CreateCA(ctx context.Context, name string, caType model.CATy
 }
 
 func (s *caService) HandleOCSPRequest(ctx context.Context, requestData []byte, caID int) ([]byte, error) {
+
 	// Parse OCSP request
 	ocspReq, err := ocsp.ParseRequest(requestData)
 	if err != nil {
@@ -616,4 +618,8 @@ func (s *caService) DeleteCA(ctx context.Context, caID int) error {
 
 	// Soft delete CA (update status to 'deleted')
 	return s.repo.UpdateCAStatus(ctx, caID, string(model.RevokedCaStatus))
+}
+
+func (s *caService) GetAllCertificates(ctx context.Context) ([]model.Certificate, error) {
+	return s.repo.GetAllCertificates(ctx)
 }

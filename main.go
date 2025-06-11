@@ -118,6 +118,12 @@ type CAChainResponse struct {
 	Chain []model.CA `json:"chain"`
 }
 
+// CertificateListResponse represents the response for listing certificates
+type CertificateListResponse struct {
+	Certificates []model.Certificate `json:"certificates"`
+	Total        int                 `json:"total" example:"10"`
+}
+
 type App struct {
 	keyService service.KeyManagementService
 	caService  ca_service.CaService
@@ -525,6 +531,29 @@ func (app *App) DeleteCA(c *gin.Context) {
 	c.JSON(http.StatusOK, map[string]string{"message": "CA deleted successfully"})
 }
 
+// @Summary Get all certificates
+// @Description Retrieve all certificates from the database
+// @Tags Certificate Authority
+// @Accept json
+// @Produce json
+// @Success 200 {object} CertificateListResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /certificates [get]
+func (app *App) GetAllCertificates(c *gin.Context) {
+	ctx := context.Background()
+
+	certificates, err := app.caService.GetAllCertificates(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, CertificateListResponse{
+		Certificates: certificates,
+		Total:        len(certificates),
+	})
+}
+
 // @Summary Handle OCSP request
 // @Description Handle Online Certificate Status Protocol requests to check certificate status
 // @Tags Certificate Authority
@@ -630,7 +659,8 @@ func main() {
 	r.GET("/ca/:id/chain", app.GetCAChain)
 	r.PUT("/ca/:id/status", app.UpdateCAStatus)
 	r.POST("/ca/:id/revoke", app.RevokeCA)
-	// r.DELETE("/ca/:id", app.DeleteCA)
+	r.DELETE("/ca/:id", app.DeleteCA)
+	r.GET("/certificates", app.GetAllCertificates)
 	r.POST("/ocsp", app.HandleOCSP)
 
 	go func() {
