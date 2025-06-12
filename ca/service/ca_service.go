@@ -12,6 +12,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"log"
+	"strings"
 
 	"encoding/asn1"
 	"encoding/pem"
@@ -159,6 +160,17 @@ func (s *caService) IssueCertificate(ctx context.Context, csrPEM string, caID in
 	if err := s.repo.SaveCert(ctx, certData); err != nil {
 		return model.Certificate{}, err
 	}
+
+	var certChain strings.Builder
+	certChain.WriteString(string(certPEM))
+	caChain, err := s.repo.GetCAChain(ctx, ca.ID)
+	if err != nil {
+		return model.Certificate{}, err
+	}
+	for _, ca := range caChain {
+		certChain.WriteString(ca.CertPEM)
+	}
+	certData.CertPEM = certChain.String()
 
 	return certData, nil
 }
